@@ -5,6 +5,7 @@ import { NodeType, DialogueNode, BranchNode, JumpNode, LocationNode, NodeEvent, 
 import * as GeminiService from '../services/geminiService';
 import { useEditorStore } from '../store/useEditorStore';
 import { ACTION_REGISTRY, ParamConfig } from '../engine/Registry';
+import { useShallow } from 'zustand/react/shallow';
 
 const NODE_TYPE_LABELS: Record<NodeType, string> = {
   [NodeType.START]: '开始 (Start)',
@@ -66,7 +67,15 @@ const ActionStackEditor: React.FC<{
   onChange: (actions: ScriptAction[]) => void;
   onBlur: () => void;
 }> = ({ actions, onChange, onBlur }) => {
-  const { story } = useEditorStore();
+  // Only select meta data needed for dropdowns
+  const { characters, items, clues, attributes, shops } = useEditorStore(useShallow(state => ({
+      characters: state.story.characters,
+      items: state.story.items,
+      clues: state.story.clues,
+      attributes: state.story.attributes,
+      shops: state.story.shops
+  })));
+
   const [showMenu, setShowMenu] = useState(false);
 
   const addAction = (type: ScriptActionType) => {
@@ -107,11 +116,11 @@ const ActionStackEditor: React.FC<{
 
       if (param.type === 'entity') {
           let options: {id: string, name: string}[] = [];
-          if (param.entityType === 'character') options = story.characters;
-          if (param.entityType === 'item') options = story.items;
-          if (param.entityType === 'clue') options = story.clues;
-          if (param.entityType === 'attribute') options = story.attributes;
-          if (param.entityType === 'shop') options = story.shops || [];
+          if (param.entityType === 'character') options = characters;
+          if (param.entityType === 'item') options = items;
+          if (param.entityType === 'clue') options = clues;
+          if (param.entityType === 'attribute') options = attributes;
+          if (param.entityType === 'shop') options = shops || [];
 
           return (
               <select 
@@ -215,10 +224,24 @@ const ActionStackEditor: React.FC<{
 };
 
 const Inspector: React.FC = () => {
-  const { story, selectedIds, updateNode, startEditing, commitEditing } = useEditorStore();
+  const { updateNode, startEditing, commitEditing } = useEditorStore(useShallow(state => ({
+      updateNode: state.updateNode,
+      startEditing: state.startEditing,
+      commitEditing: state.commitEditing
+  })));
   
-  const activeSegment = story.segments.find(s => s.id === story.activeSegmentId);
-  const selectedNode = selectedIds.length === 1 && activeSegment ? activeSegment.nodes[selectedIds[0]] : null;
+  // Specific Selector for Active Node Data
+  const selectedNode = useEditorStore(useShallow(state => {
+      const activeSeg = state.story.segments.find(s => s.id === state.story.activeSegmentId);
+      if (!activeSeg || state.selectedIds.length !== 1) return null;
+      return activeSeg.nodes[state.selectedIds[0]] || null;
+  }));
+
+  // Meta Data for Dropdowns
+  const { characters, attributes } = useEditorStore(useShallow(state => ({
+      characters: state.story.characters,
+      attributes: state.story.attributes
+  })));
   
   const [isGenerating, setIsGenerating] = useState(false);
   const [aiVariations, setAiVariations] = useState<string[]>([]);
@@ -234,7 +257,7 @@ const Inspector: React.FC = () => {
     setAiVariations([]);
     
     const dialogueNode = selectedNode as DialogueNode;
-    const charName = story.characters.find(c => c.id === dialogueNode.characterId)?.name || "未知角色";
+    const charName = characters.find(c => c.id === dialogueNode.characterId)?.name || "未知角色";
     const variations = await GeminiService.generateDialogueVariations(charName, dialogueNode.text);
     
     setAiVariations(variations);
@@ -402,7 +425,7 @@ const Inspector: React.FC = () => {
                 }}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-sm text-zinc-300 focus:outline-none"
               >
-                {story.characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
 
@@ -694,7 +717,7 @@ const Inspector: React.FC = () => {
               
               <div className="space-y-3">
                 {(selectedNode as BranchNode).conditions?.map((condition, idx) => {
-                  const variable = story.attributes.find(v => v.id === condition.variableId);
+                  const variable = attributes.find(v => v.id === condition.variableId);
                   const varType = variable?.type || 'string';
                   const availableOps = OPERATORS_BY_TYPE[varType] || OPERATORS_BY_TYPE['string'];
 
@@ -729,7 +752,7 @@ const Inspector: React.FC = () => {
                               onBlur={commitEditing}
                            >
                              <option value="" disabled>-- 属性 (Attribute) --</option>
-                             {story.attributes.map(v => (
+                             {attributes.map(v => (
                                <option key={v.id} value={v.id}>{v.name}</option>
                              ))}
                            </select>
@@ -784,7 +807,7 @@ const Inspector: React.FC = () => {
                   );
                 })}
                 
-                {story.attributes.length === 0 ? (
+                {attributes.length === 0 ? (
                   <div className="text-center text-[10px] text-zinc-500 py-4 border border-dashed border-zinc-800 rounded bg-zinc-900/50">
                      请先在 "属性与状态" 面板中添加属性
                   </div>
@@ -794,7 +817,7 @@ const Inspector: React.FC = () => {
                       const node = selectedNode as BranchNode;
                       startEditing(node.id);
                       // Default to first variable
-                      const firstVar = story.attributes[0];
+                      const firstVar = attributes[0];
                       updateNode(node.id, { conditions: [...(node.conditions || []), { id: `c_${Date.now()}`, variableId: firstVar?.id || '', operator: '==', value: '0' }] });
                       commitEditing();
                     }}

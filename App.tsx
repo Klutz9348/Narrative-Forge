@@ -2,11 +2,13 @@
 import React from 'react';
 import { Play, Save, Undo, Redo, X, Box, Variable, Users, Package, Search, Gauge, ShoppingCart } from 'lucide-react';
 import { useEditorStore } from './store/useEditorStore';
+import { useRuntimeStore } from './store/useRuntimeStore';
 
 // Components
 import Sidebar from './components/Sidebar';
 import Inspector from './components/Inspector';
 import Canvas from './components/Canvas';
+import GameOverlay from './components/GameOverlay';
 import { CharacterEditor, ItemEditor, ClueEditor, AttributeEditor, ShopEditor } from './components/AssetEditors';
 import { TabType } from './types';
 
@@ -25,6 +27,7 @@ const getTabIcon = (type: TabType) => {
 
 function App() {
   const { story, undo, redo, canUndo, canRedo, tabs, activeTabId, setActiveTab, closeTab } = useEditorStore();
+  const { setIsRunning } = useRuntimeStore();
 
   const activeTab = tabs.find(t => t.id === activeTabId);
 
@@ -104,7 +107,10 @@ function App() {
                   <Redo className="w-4 h-4" />
                 </button>
              </div>
-            <button className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-xs px-3 py-1.5 rounded transition-colors font-semibold shadow-sm shadow-indigo-900/20">
+            <button 
+              onClick={() => setIsRunning(true)}
+              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-xs px-3 py-1.5 rounded transition-colors font-semibold shadow-sm shadow-indigo-900/20"
+            >
               <Play className="w-3 h-3 fill-current" /> 运行
             </button>
           </div>
@@ -118,6 +124,9 @@ function App() {
 
       {/* Inspector is only visible when Canvas is active */}
       {activeTab?.type === 'canvas' && <Inspector />}
+
+      {/* Game Runtime Overlay */}
+      <GameOverlay />
     </div>
   );
 }

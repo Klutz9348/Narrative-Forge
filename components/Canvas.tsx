@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { MousePointer2, Type, Image as ImageIcon, ZoomIn, ZoomOut, GitGraph, ArrowRightCircle, ChevronDown, Layers, Zap, Clapperboard, Timer, Smartphone, MessageSquare, Play, Package, Vote, Variable } from 'lucide-react';
 import { NodeType, NarrativeNode, Vector2, DialogueNode, BranchNode, JumpNode, LocationNode, ActionNode, Hotspot, ScriptActionType, VoteNode } from '../types';
 import { useEditorStore } from '../store/useEditorStore';
+import { useShallow } from 'zustand/react/shallow';
 
 // Bezier Curve Helper
 const getBezierPath = (
@@ -38,7 +39,7 @@ const NodeComponent: React.FC<NodeComponentProps> = React.memo(({
     node, selected, onMouseDown, onMouseUp, onHandleMouseDown, renderContent, getNodeColorClass, getNodeIcon 
 }) => {
     const elementRef = useRef<HTMLDivElement>(null);
-    const { updateNode } = useEditorStore();
+    const updateNode = useEditorStore(state => state.updateNode);
     
     // Auto-resize Logic: Sync DOM height to Store
     useEffect(() => {
@@ -65,7 +66,6 @@ const NodeComponent: React.FC<NodeComponentProps> = React.memo(({
 
     const isDialogue = node.type === NodeType.DIALOGUE;
     const isBranch = node.type === NodeType.BRANCH;
-    const isLocation = node.type === NodeType.LOCATION;
     const isVote = node.type === NodeType.VOTE;
     const isStart = node.type === NodeType.START;
 
@@ -125,10 +125,8 @@ const NodeComponent: React.FC<NodeComponentProps> = React.memo(({
 });
 
 const Canvas: React.FC = () => {
+  // 1. Actions (Stable)
   const { 
-    story, 
-    selectedIds, 
-    canvasTransform, 
     selectNode, 
     clearSelection,
     updateNode,
@@ -138,11 +136,37 @@ const Canvas: React.FC = () => {
     startEditing,
     commitEditing,
     setCanvasTransform
-  } = useEditorStore();
+  } = useEditorStore(useShallow(state => ({
+    selectNode: state.selectNode,
+    clearSelection: state.clearSelection,
+    updateNode: state.updateNode,
+    addNode: state.addNode,
+    addEdge: state.addEdge,
+    deleteSelection: state.deleteSelection,
+    startEditing: state.startEditing,
+    commitEditing: state.commitEditing,
+    setCanvasTransform: state.setCanvasTransform
+  })));
 
-  const activeSegment = story.segments.find(s => s.id === story.activeSegmentId);
-  const nodes = activeSegment ? (Object.values(activeSegment.nodes) as NarrativeNode[]) : [];
-  const edges = activeSegment ? activeSegment.edges : [];
+  // 2. High Frequency State
+  const canvasTransform = useEditorStore(state => state.canvasTransform);
+  const selectedIds = useEditorStore(state => state.selectedIds, useShallow);
+
+  // 3. Asset Data (Filtered)
+  const { activeSegmentId, nodes, edges } = useEditorStore(useShallow(state => {
+    const activeSeg = state.story.segments.find(s => s.id === state.story.activeSegmentId);
+    return {
+        activeSegmentId: state.story.activeSegmentId,
+        nodes: activeSeg ? (Object.values(activeSeg.nodes) as NarrativeNode[]) : [],
+        edges: activeSeg ? activeSeg.edges : []
+    };
+  }));
+
+  // Need characters and attributes for node label rendering
+  const { characters, attributes } = useEditorStore(useShallow(state => ({
+      characters: state.story.characters,
+      attributes: state.story.attributes
+  })));
 
   // Local State
   const [isPanning, setIsPanning] = useState(false);
@@ -182,6 +206,8 @@ const Canvas: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // --- CRITICAL: State Ref for Global Listeners ---
+  // Note: We do NOT put 'story' here to avoid subscribing to it.
+  // We access story via useEditorStore.getState() inside handlers.
   const stateRef = useRef({
     canvasTransform,
     dragState,
@@ -190,7 +216,6 @@ const Canvas: React.FC = () => {
     linkingState,
     isPanning,
     panStart,
-    story
   });
 
   useEffect(() => {
@@ -202,9 +227,8 @@ const Canvas: React.FC = () => {
       linkingState, 
       isPanning, 
       panStart,
-      story 
     };
-  }, [canvasTransform, dragState, hotspotDragState, hotspotResizeState, linkingState, isPanning, panStart, story]);
+  }, [canvasTransform, dragState, hotspotDragState, hotspotResizeState, linkingState, isPanning, panStart]);
 
   // --- Keyboard Shortcuts ---
   useEffect(() => {
@@ -260,7 +284,9 @@ const Canvas: React.FC = () => {
         const newX = Math.min(Math.max(0, current.hotspotDragState.initialRect.x + dxPercent), 100 - current.hotspotDragState.initialRect.w);
         const newY = Math.min(Math.max(0, current.hotspotDragState.initialRect.y + dyPercent), 100 - current.hotspotDragState.initialRect.h);
 
-        const activeSegment = current.story?.segments.find(s => s.id === current.story.activeSegmentId);
+        // Access store directly to avoid dependency
+        const storeState = useEditorStore.getState();
+        const activeSegment = storeState.story?.segments.find(s => s.id === storeState.story.activeSegmentId);
         const node = activeSegment?.nodes[current.hotspotDragState.nodeId];
         
         if (node && node.type === NodeType.LOCATION) {
@@ -308,7 +334,8 @@ const Canvas: React.FC = () => {
         if (x + w > 100) { w = 100 - x; }
         if (y + h > 100) { h = 100 - y; }
 
-        const activeSegment = current.story?.segments.find(s => s.id === current.story.activeSegmentId);
+        const storeState = useEditorStore.getState();
+        const activeSegment = storeState.story?.segments.find(s => s.id === storeState.story.activeSegmentId);
         const node = activeSegment?.nodes[nodeId];
         
         if (node && node.type === NodeType.LOCATION) {
@@ -489,7 +516,9 @@ const Canvas: React.FC = () => {
      e.preventDefault(); 
      e.stopPropagation(); 
      
-     const node = story.segments.find(s => s.id === story.activeSegmentId)?.nodes[nodeId];
+     // Access store directly to find node dimensions for linking
+     const storeState = useEditorStore.getState();
+     const node = storeState.story.segments.find(s => s.id === storeState.story.activeSegmentId)?.nodes[nodeId];
      if(!node) return;
 
      // Re-calc helper for this specific event
@@ -583,7 +612,7 @@ const Canvas: React.FC = () => {
      setLinkingState(newLinkingState);
      stateRef.current.linkingState = newLinkingState;
      setShowLogicMenu(false);
-  }, [story, canvasTransform]);
+  }, [canvasTransform]); // Depend on canvasTransform as we use it for mouse pos calc
 
   const handleInputMouseUp = useCallback((e: React.MouseEvent, targetNodeId: string) => {
     const currentLinking = stateRef.current.linkingState;
@@ -638,7 +667,8 @@ const Canvas: React.FC = () => {
   // --- Rendering Helpers ---
 
   const getNodeHandlePosition = (nodeId: string, handleId?: string, type: 'input' | 'output' = 'output') => {
-    const node = activeSegment?.nodes[nodeId];
+    // We can use the nodes map from the hook, which is efficiently updated
+    const node = nodes.find(n => n.id === nodeId);
     if (!node) return { x: 0, y: 0 };
 
     const { BORDER, PADDING, ITEM_HEIGHT, ITEM_GAP, BRANCH_GAP, HEADER_HEIGHT } = LAYOUT;
@@ -735,7 +765,7 @@ const Canvas: React.FC = () => {
         content = (
           <>
             <div className="font-bold text-zinc-500 mb-1 shrink-0">
-              {story.characters.find(c => c.id === (node as DialogueNode).characterId)?.name}
+              {characters.find(c => c.id === (node as DialogueNode).characterId)?.name}
             </div>
             <div className="italic opacity-80 mb-[8px] min-h-[48px] whitespace-pre-wrap">
               "{(node as DialogueNode).text}"
@@ -819,7 +849,7 @@ const Canvas: React.FC = () => {
             
             <div className="flex flex-col" style={{ gap: LAYOUT.BRANCH_GAP }}>
               {branchNode.conditions?.map((c, idx) => {
-                const varName = story.attributes.find(v => v.id === c.variableId)?.name || '???';
+                const varName = attributes.find(v => v.id === c.variableId)?.name || '???';
                 
                 return (
                   <div key={c.id} className="relative flex items-center shrink-0" style={{ height: ITEM_HEIGHT }}>
@@ -856,13 +886,16 @@ const Canvas: React.FC = () => {
       
       case NodeType.JUMP:
         const jumpNode = node as JumpNode;
-        const targetSeg = story.segments.find(s => s.id === jumpNode.targetSegmentId);
+        // Need segments list for this. Since it's just display name, accessing story.segments via getter might be overkill.
+        // We can pass a simplified segments list or just show ID if perf critical.
+        // For now, let's grab it from store state directly since it's just for rendering.
+        const segmentName = useEditorStore.getState().story.segments.find(s => s.id === jumpNode.targetSegmentId)?.name;
         content = (
           <div className="flex items-center justify-center h-full">
             <div className="flex items-center gap-2 text-rose-300 bg-rose-900/20 px-3 py-2 rounded-full border border-rose-500/30">
                <ArrowRightCircle className="w-4 h-4" />
                <span className="font-bold truncate max-w-[120px]">
-                 {targetSeg ? targetSeg.name : 'Select Target'}
+                 {segmentName || 'Select Target'}
                </span>
             </div>
           </div>
@@ -888,7 +921,7 @@ const Canvas: React.FC = () => {
                   // Try to get attribute name if available
                   let extraText = "";
                   if (cmd.type === ScriptActionType.UPDATE_ATTRIBUTE && cmd.params.attributeId) {
-                      const attrName = story.attributes.find(a => a.id === cmd.params.attributeId)?.name;
+                      const attrName = attributes.find(a => a.id === cmd.params.attributeId)?.name;
                       if(attrName) extraText = ` (${attrName})`;
                   }
 

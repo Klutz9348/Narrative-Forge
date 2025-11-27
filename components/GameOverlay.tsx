@@ -1,10 +1,9 @@
-
-import React, { useEffect, useRef, useState } from 'react';
-import { X, Play, Settings, Package, ShoppingCart, User, Heart, Coins, Brain, MessageSquare, ArrowRight, SkipForward } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { X, Package, ShoppingCart, User, Heart, Coins, Brain, ArrowRight, SkipForward } from 'lucide-react';
 import { useEditorStore } from '../store/useEditorStore';
 import { useRuntimeStore } from '../store/useRuntimeStore';
 import { NarrativeEngine } from '../engine/NarrativeEngine';
-import { NodeType, DialogueNode, LocationNode, VoteNode, ScriptActionType } from '../types';
+import { NodeType, DialogueNode, LocationNode, VoteNode } from '../types';
 
 const EngineInstance = new NarrativeEngine();
 
@@ -78,16 +77,9 @@ const GameOverlay: React.FC = () => {
   const isVote = currentNode?.type === NodeType.VOTE;
 
   // Find background image (persist last known location image if in dialogue)
-  // In a real app, we'd store "currentLocation" in store. For MVP, we traverse back or use current.
-  // Simple hack: Location nodes set the background. Dialogue nodes overlay it.
-  // We need a ref to store last background.
-  const [bgImage, setBgImage] = useState<string>('');
-  
-  useEffect(() => {
-    if (currentNode?.type === NodeType.LOCATION) {
-        setBgImage((currentNode as LocationNode).backgroundImage || '');
-    }
-  }, [currentNode]);
+  const bgImage = currentNode?.type === NodeType.LOCATION 
+      ? (currentNode as LocationNode).backgroundImage 
+      : ''; // Simple logic for MVP, ideally persist from last location
 
   const handleChoice = (choiceId?: string) => {
     EngineInstance.advance(choiceId);
@@ -102,7 +94,7 @@ const GameOverlay: React.FC = () => {
       
       {/* 1. Background Layer */}
       <div className="absolute inset-0 bg-zinc-900">
-        {bgImage && <img src={bgImage} className="w-full h-full object-cover opacity-80" />}
+        {bgImage && <img src={bgImage} className="w-full h-full object-cover opacity-80" alt="background" />}
         <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/90 pointer-events-none" />
       </div>
 
@@ -276,7 +268,7 @@ const GameOverlay: React.FC = () => {
                           return (
                               <div key={itemId} className="bg-black/40 border border-zinc-700 rounded-lg p-3 flex flex-col items-center gap-2 hover:border-amber-500/50 transition-colors">
                                   <div className="w-12 h-12 bg-zinc-800 rounded flex items-center justify-center text-2xl">
-                                      {item.icon ? <img src={item.icon} className="w-full h-full object-cover rounded" /> : '📦'}
+                                      {item.icon ? <img src={item.icon} className="w-full h-full object-cover rounded" alt={item.name} /> : '📦'}
                                   </div>
                                   <div className="text-center">
                                       <div className="text-xs font-bold text-zinc-300 truncate w-full">{item.name}</div>
@@ -296,4 +288,75 @@ const GameOverlay: React.FC = () => {
       {/* 6. Shop Modal */}
       {runtime.activeShopId && (
           <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-8 animate-in fade-in duration-200">
-              <div className="bg-zinc-900 border border-zinc-
+              <div className="bg-zinc-900 border border-zinc-700 rounded-xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl">
+                {(() => {
+                    const shop = story.shops?.find(s => s.id === runtime.activeShopId);
+                    if (!shop) return <div className="p-4">Shop not found</div>;
+                    
+                    return (
+                        <>
+                          <div className="p-4 border-b border-zinc-800 flex justify-between items-center">
+                              <div>
+                                  <h3 className="text-lg font-bold flex items-center gap-2"><ShoppingCart className="w-5 h-5 text-emerald-500" /> {shop.name}</h3>
+                                  <p className="text-xs text-zinc-500">{shop.description}</p>
+                              </div>
+                              <button onClick={runtime.closeShop} className="text-zinc-500 hover:text-white"><X className="w-5 h-5" /></button>
+                          </div>
+                          <div className="p-6 grid grid-cols-1 gap-3 overflow-y-auto">
+                              {shop.inventory.map((shopItem) => {
+                                  const itemDef = story.items.find(i => i.id === shopItem.itemId);
+                                  const playerMoney = runtime.attributes[shopItem.currencyAttributeId] ?? 0;
+                                  const canAfford = playerMoney >= shopItem.price;
+                                  
+                                  const buy = () => {
+                                      if (!canAfford) {
+                                          runtime.showToast("资金不足 (Not enough currency)");
+                                          return;
+                                      }
+                                      EngineInstance.variableStore.modifyAttribute(shopItem.currencyAttributeId, 'sub', shopItem.price);
+                                      EngineInstance.variableStore.addItem(shopItem.itemId, 1);
+                                      runtime.showToast(`购买了 ${itemDef?.name || '物品'}`);
+                                  };
+
+                                  if (!itemDef) return null;
+
+                                  return (
+                                      <div key={shopItem.itemId} className="flex items-center justify-between bg-black/40 p-3 rounded-lg border border-zinc-800">
+                                          <div className="flex items-center gap-3">
+                                              <div className="w-10 h-10 bg-zinc-800 rounded flex items-center justify-center">
+                                                  {itemDef.icon ? <img src={itemDef.icon} className="w-full h-full object-cover rounded" alt={itemDef.name} /> : '🎁'}
+                                              </div>
+                                              <div>
+                                                  <div className="text-sm font-bold text-zinc-200">{itemDef.name}</div>
+                                                  <div className="text-xs text-zinc-500">Price: {shopItem.price}</div>
+                                              </div>
+                                          </div>
+                                          <button 
+                                              onClick={buy}
+                                              disabled={!canAfford}
+                                              className={`px-3 py-1.5 rounded text-xs font-bold transition-colors ${
+                                                  canAfford 
+                                                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white' 
+                                                  : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+                                              }`}
+                                          >
+                                              购买
+                                          </button>
+                                      </div>
+                                  );
+                              })}
+                              {shop.inventory.length === 0 && (
+                                  <div className="text-center text-zinc-500 py-8">暂无商品上架</div>
+                              )}
+                          </div>
+                        </>
+                    );
+                })()}
+              </div>
+          </div>
+      )}
+    </div>
+  );
+};
+
+export default GameOverlay;

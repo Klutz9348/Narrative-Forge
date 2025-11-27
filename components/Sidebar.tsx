@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { Layers, Box, Plus, Type, Image as ImageIcon, Gauge, Trash2, Users, Search, Package, Ghost, ChevronRight, ChevronDown, ShoppingCart } from 'lucide-react';
 import { NodeType, NarrativeNode } from '../types';
 import { useEditorStore } from '../store/useEditorStore';
+import { useShallow } from 'zustand/react/shallow';
 
 const SidebarSection: React.FC<{ 
     title: string; 
@@ -31,8 +32,33 @@ const SidebarSection: React.FC<{
 };
 
 const Sidebar: React.FC = () => {
-  const { story, selectedIds, selectNode, openTab, addCharacter, addItem, addClue, addShop } = useEditorStore();
-  const activeSegment = story.segments.find(s => s.id === story.activeSegmentId);
+  const { openTab, addCharacter, addItem, addClue, addShop, selectNode } = useEditorStore(
+    useShallow(state => ({
+        openTab: state.openTab,
+        addCharacter: state.addCharacter,
+        addItem: state.addItem,
+        addClue: state.addClue,
+        addShop: state.addShop,
+        selectNode: state.selectNode
+    }))
+  );
+
+  const { segments, activeSegmentId, characters, items, shops, clues, attributes } = useEditorStore(
+    useShallow(state => ({
+        segments: state.story.segments,
+        activeSegmentId: state.story.activeSegmentId,
+        characters: state.story.characters,
+        items: state.story.items,
+        shops: state.story.shops,
+        clues: state.story.clues,
+        attributes: state.story.attributes
+    }))
+  );
+
+  const selectedIds = useEditorStore(state => state.selectedIds, useShallow);
+
+  // We find active segment for rendering nodes list
+  const activeSegment = segments.find(s => s.id === activeSegmentId);
 
   return (
     <div className="w-64 bg-[#09090b] border-r border-zinc-800 flex flex-col h-full select-none z-10 shrink-0">
@@ -51,15 +77,15 @@ const Sidebar: React.FC = () => {
         <SidebarSection title="剧情结构" icon={<Layers className="w-4 h-4 text-indigo-500" />} defaultOpen={true}>
             <div className="px-2 space-y-1 mt-1">
                 {/* Segments */}
-                {story.segments.map(seg => (
+                {segments.map(seg => (
                     <div key={seg.id} className="pl-4">
-                        <div className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs ${story.activeSegmentId === seg.id ? 'text-zinc-100 bg-zinc-800' : 'text-zinc-500'}`}>
+                        <div className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs ${activeSegmentId === seg.id ? 'text-zinc-100 bg-zinc-800' : 'text-zinc-500'}`}>
                             <Box className="w-3 h-3" />
                             {seg.name}
                         </div>
                         
                         {/* Nodes (Only for active segment) */}
-                        {story.activeSegmentId === seg.id && (
+                        {activeSegmentId === seg.id && (
                              <div className="ml-2 pl-2 border-l border-zinc-800 mt-1 space-y-0.5">
                                 {(Object.values(seg.nodes) as NarrativeNode[]).map(node => (
                                     <div 
@@ -96,7 +122,7 @@ const Sidebar: React.FC = () => {
             }
         >
              <div className="px-4 py-2 text-xs text-zinc-500 hover:text-zinc-300 cursor-pointer flex items-center gap-2" onClick={() => openTab('variable')}>
-                 <span className="italic">点击管理 {story.attributes.length} 个属性 (HP, Coin...)</span>
+                 <span className="italic">点击管理 {attributes.length} 个属性 (HP, Coin...)</span>
              </div>
         </SidebarSection>
 
@@ -109,7 +135,7 @@ const Sidebar: React.FC = () => {
             }
         >
              <div className="px-2 space-y-0.5 mt-1">
-                {story.characters.map(char => (
+                {characters.map(char => (
                     <div 
                         key={char.id}
                         onClick={() => openTab('character', char.id, char.name)}
@@ -121,7 +147,7 @@ const Sidebar: React.FC = () => {
                         <span className="truncate flex-1">{char.name}</span>
                     </div>
                 ))}
-                {story.characters.length === 0 && <div className="px-4 py-1 text-[10px] text-zinc-600">暂无角色</div>}
+                {characters.length === 0 && <div className="px-4 py-1 text-[10px] text-zinc-600">暂无角色</div>}
              </div>
         </SidebarSection>
 
@@ -134,7 +160,7 @@ const Sidebar: React.FC = () => {
             }
         >
              <div className="px-2 space-y-0.5 mt-1">
-                {story.items.map(item => (
+                {items.map(item => (
                     <div 
                         key={item.id}
                         onClick={() => openTab('item', item.id, item.name)}
@@ -144,7 +170,7 @@ const Sidebar: React.FC = () => {
                         <span className="truncate flex-1">{item.name}</span>
                     </div>
                 ))}
-                 {story.items.length === 0 && <div className="px-4 py-1 text-[10px] text-zinc-600">暂无道具</div>}
+                 {items.length === 0 && <div className="px-4 py-1 text-[10px] text-zinc-600">暂无道具</div>}
              </div>
         </SidebarSection>
 
@@ -157,7 +183,7 @@ const Sidebar: React.FC = () => {
             }
         >
              <div className="px-2 space-y-0.5 mt-1">
-                {(story.shops || []).map(shop => (
+                {(shops || []).map(shop => (
                     <div 
                         key={shop.id}
                         onClick={() => openTab('shop', shop.id, shop.name)}
@@ -167,7 +193,7 @@ const Sidebar: React.FC = () => {
                         <span className="truncate flex-1">{shop.name}</span>
                     </div>
                 ))}
-                 {(!story.shops || story.shops.length === 0) && <div className="px-4 py-1 text-[10px] text-zinc-600">暂无商店</div>}
+                 {(!shops || shops.length === 0) && <div className="px-4 py-1 text-[10px] text-zinc-600">暂无商店</div>}
              </div>
         </SidebarSection>
 
@@ -180,7 +206,7 @@ const Sidebar: React.FC = () => {
             }
         >
              <div className="px-2 space-y-0.5 mt-1">
-                {story.clues.map(clue => (
+                {clues.map(clue => (
                     <div 
                         key={clue.id}
                         onClick={() => openTab('clue', clue.id, clue.name)}
@@ -190,7 +216,7 @@ const Sidebar: React.FC = () => {
                         <span className="truncate flex-1">{clue.name}</span>
                     </div>
                 ))}
-                {story.clues.length === 0 && <div className="px-4 py-1 text-[10px] text-zinc-600">暂无线索</div>}
+                {clues.length === 0 && <div className="px-4 py-1 text-[10px] text-zinc-600">暂无线索</div>}
              </div>
         </SidebarSection>
 
