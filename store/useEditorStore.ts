@@ -1,5 +1,10 @@
+
 import { create } from 'zustand';
 import { StoryAsset, NodeType, NarrativeNode, Edge } from '../types';
+import { CommandBus } from '../engine/CommandBus';
+import { AssetManager } from '../engine/AssetManager';
+import { SelectionManager } from '../engine/SelectionManager';
+import { UpdateNodeCommand, AddNodeCommand, RemoveNodeCommand } from '../engine/commands';
 
 // --- Initial Data ---
 
@@ -75,107 +80,161 @@ interface EditorState {
   selectedIds: string[];
   canvasTransform: { x: number; y: number; scale: number };
   
-  // History for Undo/Redo (Deep Cloned)
-  history: StoryAsset[];
-  historyIndex: number;
+  // Transient state for editing
+  editingNodeId: string | null;
+  originalNodeData: NarrativeNode | null;
 
   // Actions
   selectNode: (id: string, multi?: boolean) => void;
   clearSelection: () => void;
+  
+  // Node Manipulation
+  // Direct/Transient update (for high frequency events like dragging/typing)
   updateNode: (id: string, data: Partial<NarrativeNode>) => void;
+  
+  // Transactional Actions (start/commit edits to create Commands)
+  startEditing: (id: string) => void;
+  commitEditing: () => void;
+  
+  // Structural Actions
+  addNode: (type: NodeType, position: {x:number, y:number}) => void;
+  removeNode: (id: string) => void;
+
   setCanvasTransform: (transform: { x: number; y: number; scale: number }) => void;
   
-  // History Actions
-  pushHistory: () => void;
+  // Command Bus
   undo: () => void;
   redo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
-export const useEditorStore = create<EditorState>((set, get) => ({
-  story: INITIAL_STORY,
-  selectedIds: [],
-  canvasTransform: { x: 0, y: 0, scale: 1 },
+// Instantiate core systems
+const commandBus = new CommandBus();
+
+export const useEditorStore = create<EditorState>((set, get) => {
   
-  // Initialize history with a deep copy to prevent reference issues
-  history: [JSON.parse(JSON.stringify(INITIAL_STORY))],
-  historyIndex: 0,
-
-  selectNode: (id, multi = false) => set(state => {
-    if (!id) return { selectedIds: [] };
-    return {
-      selectedIds: multi ? [...state.selectedIds, id] : [id]
-    };
-  }),
-
-  clearSelection: () => set({ selectedIds: [] }),
-
-  updateNode: (nodeId, data) => {
-    set(state => {
-      const activeSeg = state.story.segments.find(s => s.id === state.story.activeSegmentId);
-      if (!activeSeg) return state;
-
-      if (!activeSeg.nodes[nodeId]) return state;
-
-      const updatedSeg = {
-        ...activeSeg,
-        nodes: {
-          ...activeSeg.nodes,
-          [nodeId]: { ...activeSeg.nodes[nodeId], ...data }
-        }
-      };
-
-      const newStory = {
-        ...state.story,
-        // Fix: Only update the active segment
-        segments: state.story.segments.map(s => s.id === activeSeg.id ? updatedSeg : s)
-      };
-
-      return { story: newStory };
+  // Helper to trigger UI update after command execution
+  const syncCommandState = () => {
+    set({ 
+      canUndo: commandBus.canUndo(),
+      canRedo: commandBus.canRedo()
     });
-  },
+  };
 
-  setCanvasTransform: (transform) => set({ canvasTransform: transform }),
+  const selectionManager = new SelectionManager(
+    () => get().selectedIds,
+    (ids) => set({ selectedIds: ids })
+  );
 
-  pushHistory: () => set(state => {
-    // Deep clone the current story to isolate history state
-    const snapshot = JSON.parse(JSON.stringify(state.story));
-    
-    // Discard any future history if we are in the middle of the stack
-    const newHistory = state.history.slice(0, state.historyIndex + 1);
-    newHistory.push(snapshot);
-    
-    // Simple limit to prevent memory issues
-    if (newHistory.length > 50) newHistory.shift();
-    
-    return {
-      history: newHistory,
-      historyIndex: newHistory.length - 1
-    };
-  }),
+  return {
+    story: INITIAL_STORY,
+    selectedIds: [],
+    canvasTransform: { x: 0, y: 0, scale: 1 },
+    editingNodeId: null,
+    originalNodeData: null,
+    canUndo: false,
+    canRedo: false,
 
-  undo: () => set(state => {
-    if (state.historyIndex > 0) {
-      const newIndex = state.historyIndex - 1;
-      // Restore a deep copy to ensure the history record itself isn't mutated by subsequent edits
-      const restoredStory = JSON.parse(JSON.stringify(state.history[newIndex]));
-      return {
-        story: restoredStory,
-        historyIndex: newIndex
-      };
+    selectNode: (id, multi) => selectionManager.select(id, multi),
+    clearSelection: () => selectionManager.clear(),
+
+    updateNode: (nodeId, data) => {
+      set(state => {
+        const activeSeg = state.story.segments.find(s => s.id === state.story.activeSegmentId);
+        if (!activeSeg || !activeSeg.nodes[nodeId]) return state;
+
+        const updatedSeg = {
+          ...activeSeg,
+          nodes: {
+            ...activeSeg.nodes,
+            [nodeId]: { ...activeSeg.nodes[nodeId], ...data }
+          }
+        };
+
+        const newStory = {
+          ...state.story,
+          segments: state.story.segments.map(s => s.id === activeSeg.id ? updatedSeg : s)
+        };
+
+        return { story: newStory };
+      });
+    },
+
+    startEditing: (id: string) => {
+        const state = get();
+        const activeSeg = state.story.segments.find(s => s.id === state.story.activeSegmentId);
+        if (activeSeg && activeSeg.nodes[id]) {
+            set({ 
+                editingNodeId: id, 
+                originalNodeData: { ...activeSeg.nodes[id] } // Shallow clone sufficient for now
+            });
+        }
+    },
+
+    commitEditing: () => {
+        const state = get();
+        const { editingNodeId, originalNodeData, story } = state;
+        
+        if (!editingNodeId || !originalNodeData) return;
+
+        const activeSeg = story.segments.find(s => s.id === story.activeSegmentId);
+        if (!activeSeg) return;
+
+        const currentNodeData = activeSeg.nodes[editingNodeId];
+        
+        // Detect if changes actually happened
+        // Simple JSON stringify comparison for MVP
+        if (JSON.stringify(originalNodeData) !== JSON.stringify(currentNodeData)) {
+            const command = new UpdateNodeCommand(
+                editingNodeId,
+                originalNodeData,
+                currentNodeData,
+                activeSeg.id,
+                set
+            );
+            // We don't execute() because the state is already updated (transiently)
+            // But we need to register it in the stack. 
+            // Wait, standard Command pattern requires execute() to do the work.
+            // But here the work is done. 
+            // We can treat the 'execute' as idempotent or simply push to stack manually?
+            // CommandBus.execute calls execute().
+            // Let's allow the command to re-set the state (it's safe).
+            commandBus.execute(command);
+            syncCommandState();
+        }
+
+        set({ editingNodeId: null, originalNodeData: null });
+    },
+
+    addNode: (type, position) => {
+        const state = get();
+        const newNode = AssetManager.createNode(type, position);
+        const command = new AddNodeCommand(newNode, state.story.activeSegmentId, set);
+        commandBus.execute(command);
+        syncCommandState();
+    },
+
+    removeNode: (id) => {
+        const state = get();
+        const activeSeg = state.story.segments.find(s => s.id === state.story.activeSegmentId);
+        if (!activeSeg || !activeSeg.nodes[id]) return;
+        
+        const node = activeSeg.nodes[id];
+        const command = new RemoveNodeCommand(id, node, activeSeg.id, set);
+        commandBus.execute(command);
+        syncCommandState();
+    },
+
+    setCanvasTransform: (transform) => set({ canvasTransform: transform }),
+
+    undo: () => {
+        commandBus.undo();
+        syncCommandState();
+    },
+    redo: () => {
+        commandBus.redo();
+        syncCommandState();
     }
-    return state;
-  }),
-
-  redo: () => set(state => {
-    if (state.historyIndex < state.history.length - 1) {
-      const newIndex = state.historyIndex + 1;
-      // Restore a deep copy
-      const restoredStory = JSON.parse(JSON.stringify(state.history[newIndex]));
-      return {
-        story: restoredStory,
-        historyIndex: newIndex
-      };
-    }
-    return state;
-  })
-}));
+  };
+});

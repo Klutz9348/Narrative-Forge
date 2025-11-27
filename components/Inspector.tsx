@@ -1,5 +1,6 @@
+
 import React, { useState } from 'react';
-import { MousePointer2, MoreVertical, Wand2 } from 'lucide-react';
+import { MousePointer2, MoreVertical, Wand2, Trash2 } from 'lucide-react';
 import { NodeType, DialogueNode } from '../types';
 import * as GeminiService from '../services/geminiService';
 import { useEditorStore } from '../store/useEditorStore';
@@ -12,7 +13,7 @@ const NODE_TYPE_LABELS: Record<NodeType, string> = {
 };
 
 const Inspector: React.FC = () => {
-  const { story, selectedIds, updateNode, pushHistory } = useEditorStore();
+  const { story, selectedIds, updateNode, startEditing, commitEditing, removeNode } = useEditorStore();
   
   const activeSegment = story.segments.find(s => s.id === story.activeSegmentId);
   const selectedNode = selectedIds.length === 1 && activeSegment ? activeSegment.nodes[selectedIds[0]] : null;
@@ -35,6 +36,12 @@ const Inspector: React.FC = () => {
     setIsGenerating(false);
   };
 
+  const handleDelete = () => {
+    if (selectedNode) {
+      removeNode(selectedNode.id);
+    }
+  };
+
   if (!selectedNode) {
     return (
       <div className="w-80 bg-zinc-900 border-l border-zinc-800 h-full flex flex-col items-center justify-center text-zinc-500 z-10">
@@ -44,18 +51,27 @@ const Inspector: React.FC = () => {
     );
   }
 
+  const handleFocus = () => startEditing(selectedNode.id);
+  const handleBlur = () => commitEditing();
+
   return (
     <div className="w-80 bg-zinc-900 border-l border-zinc-800 h-full flex flex-col overflow-y-auto z-10">
       <div className="p-4 border-b border-zinc-800">
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs font-mono text-zinc-500 uppercase">{NODE_TYPE_LABELS[selectedNode.type] || selectedNode.type}</span>
-          <MoreVertical className="w-4 h-4 text-zinc-500 cursor-pointer" />
+          <div className="flex gap-2">
+             <button onClick={handleDelete} className="text-zinc-500 hover:text-red-500" title="删除">
+               <Trash2 className="w-4 h-4" />
+             </button>
+             <MoreVertical className="w-4 h-4 text-zinc-500 cursor-pointer" />
+          </div>
         </div>
         <input 
           type="text" 
           value={selectedNode.name}
+          onFocus={handleFocus}
           onChange={(e) => updateNode(selectedNode.id, { name: e.target.value })}
-          onBlur={pushHistory}
+          onBlur={handleBlur}
           className="bg-transparent text-lg font-bold text-white w-full focus:outline-none focus:ring-1 focus:ring-indigo-500 rounded px-1 -ml-1"
         />
       </div>
@@ -70,8 +86,9 @@ const Inspector: React.FC = () => {
               <input 
                 type="number" 
                 value={selectedNode.position.x}
+                onFocus={handleFocus}
                 onChange={(e) => updateNode(selectedNode.id, { position: { ...selectedNode.position, x: parseInt(e.target.value) || 0 } })}
-                onBlur={pushHistory}
+                onBlur={handleBlur}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-300"
               />
             </div>
@@ -80,8 +97,9 @@ const Inspector: React.FC = () => {
               <input 
                 type="number" 
                 value={selectedNode.position.y}
+                onFocus={handleFocus}
                 onChange={(e) => updateNode(selectedNode.id, { position: { ...selectedNode.position, y: parseInt(e.target.value) || 0 } })}
-                onBlur={pushHistory}
+                onBlur={handleBlur}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-300"
               />
             </div>
@@ -90,8 +108,9 @@ const Inspector: React.FC = () => {
               <input 
                 type="number" 
                 value={selectedNode.size.x}
+                onFocus={handleFocus}
                 onChange={(e) => updateNode(selectedNode.id, { size: { ...selectedNode.size, x: parseInt(e.target.value) || 0 } })}
-                onBlur={pushHistory}
+                onBlur={handleBlur}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-300"
               />
             </div>
@@ -100,8 +119,9 @@ const Inspector: React.FC = () => {
               <input 
                 type="number" 
                 value={selectedNode.size.y}
+                onFocus={handleFocus}
                 onChange={(e) => updateNode(selectedNode.id, { size: { ...selectedNode.size, y: parseInt(e.target.value) || 0 } })}
-                onBlur={pushHistory}
+                onBlur={handleBlur}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-300"
               />
             </div>
@@ -127,8 +147,9 @@ const Inspector: React.FC = () => {
               <label className="text-[10px] text-zinc-500 block mb-1">角色</label>
               <select 
                 value={(selectedNode as DialogueNode).characterId}
+                onFocus={handleFocus}
                 onChange={(e) => updateNode(selectedNode.id, { characterId: e.target.value })}
-                onBlur={pushHistory}
+                onBlur={handleBlur}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-300 focus:outline-none"
               >
                 {story.characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -140,8 +161,9 @@ const Inspector: React.FC = () => {
               <textarea 
                 rows={4}
                 value={(selectedNode as DialogueNode).text}
+                onFocus={handleFocus}
                 onChange={(e) => updateNode(selectedNode.id, { text: e.target.value })}
-                onBlur={pushHistory}
+                onBlur={handleBlur}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-2 text-sm text-zinc-300 resize-none focus:ring-1 focus:ring-indigo-500 focus:outline-none"
               />
             </div>
@@ -154,8 +176,9 @@ const Inspector: React.FC = () => {
                     <div 
                       key={i} 
                       onClick={() => {
+                        handleFocus();
                         updateNode(selectedNode.id, { text: v });
-                        pushHistory(); // Commit immediately on selection
+                        handleBlur();
                       }}
                       className="text-xs text-zinc-300 p-2 bg-zinc-800 hover:bg-zinc-700 rounded cursor-pointer border border-zinc-700"
                     >

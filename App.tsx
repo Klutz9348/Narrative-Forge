@@ -8,10 +8,7 @@ import Inspector from './components/Inspector';
 import Canvas from './components/Canvas';
 
 function App() {
-  const { story, undo, redo, historyIndex, history } = useEditorStore();
-
-  const canUndo = historyIndex > 0;
-  const canRedo = historyIndex < history.length - 1;
+  const { story, undo, redo, canUndo, canRedo } = useEditorStore();
 
   return (
     <div className="flex h-screen w-full bg-black text-white font-sans overflow-hidden">

@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
+
+import React, { useState, useRef } from 'react';
 import { MousePointer2, Type, Image as ImageIcon, ZoomIn, ZoomOut, Zap } from 'lucide-react';
 import { NodeType, NarrativeNode, Vector2, DialogueNode } from '../types';
 import { useEditorStore } from '../store/useEditorStore';
@@ -19,9 +20,11 @@ const Canvas: React.FC = () => {
     canvasTransform, 
     selectNode, 
     clearSelection,
-    updateNode, 
-    setCanvasTransform,
-    pushHistory 
+    updateNode,
+    addNode,
+    startEditing,
+    commitEditing,
+    setCanvasTransform
   } = useEditorStore();
 
   const activeSegment = story.segments.find(s => s.id === story.activeSegmentId);
@@ -86,7 +89,7 @@ const Canvas: React.FC = () => {
 
   const handleMouseUp = () => {
     if (dragState) {
-      pushHistory(); // Commit change to history after drag
+      commitEditing(); // Commit the drag result to history
     }
     setIsPanning(false);
     setDragState(null);
@@ -95,13 +98,23 @@ const Canvas: React.FC = () => {
   const handleNodeMouseDown = (e: React.MouseEvent, node: NarrativeNode) => {
     e.stopPropagation();
     if (e.button !== 0) return;
+    
     selectNode(node.id, e.shiftKey);
+    startEditing(node.id); // Mark start for Undo
+    
     setDragState({
       nodeId: node.id,
       startX: e.clientX,
       startY: e.clientY,
       initialPos: { ...node.position }
     });
+  };
+
+  const handleAddNode = (type: NodeType) => {
+    // Add to center of screen accounting for transform
+    const centerX = (-canvasTransform.x + window.innerWidth / 2) / canvasTransform.scale;
+    const centerY = (-canvasTransform.y + window.innerHeight / 2) / canvasTransform.scale;
+    addNode(type, { x: centerX, y: centerY });
   };
 
   // --- Rendering Helpers ---
@@ -257,8 +270,20 @@ const Canvas: React.FC = () => {
       <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-zinc-800 rounded-lg shadow-xl border border-zinc-700 flex items-center p-1 gap-1">
         <button className="p-2 hover:bg-zinc-700 rounded text-white" title="选择 (V)"><MousePointer2 className="w-4 h-4" /></button>
         <div className="w-px h-4 bg-zinc-700 mx-1"></div>
-        <button className="p-2 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white" title="新建节点"><Type className="w-4 h-4" /></button>
-        <button className="p-2 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white"><Zap className="w-4 h-4" /></button>
+        <button 
+          className="p-2 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white" 
+          title="新建对话"
+          onClick={() => handleAddNode(NodeType.DIALOGUE)}
+        >
+          <Type className="w-4 h-4" />
+        </button>
+        <button 
+          className="p-2 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white"
+          title="新建场景"
+          onClick={() => handleAddNode(NodeType.LOCATION)}
+        >
+          <ImageIcon className="w-4 h-4" />
+        </button>
       </div>
 
       {/* Zoom Controls HUD */}

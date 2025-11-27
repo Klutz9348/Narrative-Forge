@@ -1,3 +1,4 @@
+
 // --- Basic Types ---
 export type Vector2 = { x: number; y: number };
 
@@ -16,6 +17,7 @@ export interface NodeData {
   name: string;
   position: Vector2;
   size: Vector2;
+  parentId?: string; // Hierarchical support
   // Visual specific: does this node have dynamic outputs?
   childrenIds?: string[]; // Deprecated in favor of edges, kept for compatibility if needed
 }
@@ -40,6 +42,7 @@ export interface Edge {
   sourceNodeId: string;
   targetNodeId: string;
   sourceHandleId?: string; // For nodes with multiple outputs (e.g. choices)
+  condition?: string; // Expression string, e.g. "sanity > 50"
 }
 
 export interface SegmentAsset {
