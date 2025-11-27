@@ -1,5 +1,5 @@
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { MousePointer2, Type, Image as ImageIcon, ZoomIn, ZoomOut, Zap } from 'lucide-react';
 import { NodeType, NarrativeNode, Vector2, DialogueNode } from '../types';
 import { useEditorStore } from '../store/useEditorStore';
@@ -22,6 +22,8 @@ const Canvas: React.FC = () => {
     clearSelection,
     updateNode,
     addNode,
+    addEdge,
+    deleteSelection,
     startEditing,
     commitEditing,
     setCanvasTransform
@@ -33,8 +35,29 @@ const Canvas: React.FC = () => {
 
   const [isPanning, setIsPanning] = useState(false);
   const [dragState, setDragState] = useState<{ nodeId: string, startX: number, startY: number, initialPos: Vector2 } | null>(null);
+  const [linkingState, setLinkingState] = useState<{
+    sourceNodeId: string;
+    sourceHandleId?: string;
+    startPos: Vector2;
+    mousePos: Vector2;
+  } | null>(null);
+
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // --- Keyboard Shortcuts ---
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        // Avoid deleting if input is focused
+        if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
+        deleteSelection();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [deleteSelection]);
 
   // --- Interaction Handlers ---
 
@@ -65,6 +88,13 @@ const Canvas: React.FC = () => {
     }
   };
 
+  const getCanvasMousePos = (clientX: number, clientY: number) => {
+    return {
+        x: (clientX - canvasTransform.x) / canvasTransform.scale,
+        y: (clientY - canvasTransform.y) / canvasTransform.scale
+    };
+  };
+
   const handleMouseMove = (e: React.MouseEvent) => {
     if (isPanning) {
       const dx = e.clientX - panStart.x;
@@ -84,6 +114,9 @@ const Canvas: React.FC = () => {
           y: Math.round(dragState.initialPos.y + dy)
         }
       });
+    } else if (linkingState) {
+      const pos = getCanvasMousePos(e.clientX, e.clientY);
+      setLinkingState({ ...linkingState, mousePos: pos });
     }
   };
 
@@ -93,7 +126,33 @@ const Canvas: React.FC = () => {
     }
     setIsPanning(false);
     setDragState(null);
+    setLinkingState(null); // Cancel linking if dropped on canvas
   };
+
+  // --- Drag and Drop Creation Handlers ---
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const type = e.dataTransfer.getData('nodeType') as NodeType;
+    
+    if (type) {
+       const pos = getCanvasMousePos(e.clientX, e.clientY);
+       // Center the new node (approx 300x150)
+       addNode(type, { x: pos.x - 150, y: pos.y - 75 });
+    }
+  };
+
+  const onDragStart = (e: React.DragEvent, type: NodeType) => {
+    e.dataTransfer.setData('nodeType', type);
+    e.dataTransfer.effectAllowed = 'copy';
+  };
+
+  // --- Node & Handle Interactions ---
 
   const handleNodeMouseDown = (e: React.MouseEvent, node: NarrativeNode) => {
     e.stopPropagation();
@@ -108,6 +167,33 @@ const Canvas: React.FC = () => {
       startY: e.clientY,
       initialPos: { ...node.position }
     });
+  };
+
+  const handleHandleMouseDown = (e: React.MouseEvent, nodeId: string, handleId?: string) => {
+     e.stopPropagation();
+     // Prevent starting link if dragging node
+     const startPos = getNodeHandlePosition(nodeId, handleId, 'output');
+     setLinkingState({
+         sourceNodeId: nodeId,
+         sourceHandleId: handleId,
+         startPos,
+         mousePos: getCanvasMousePos(e.clientX, e.clientY)
+     });
+  };
+
+  const handleInputMouseUp = (e: React.MouseEvent, targetNodeId: string) => {
+    e.stopPropagation();
+    if (linkingState) {
+        if (linkingState.sourceNodeId !== targetNodeId) {
+           addEdge(linkingState.sourceNodeId, targetNodeId, linkingState.sourceHandleId);
+        }
+        setLinkingState(null);
+    }
+  };
+
+  const handleEdgeClick = (e: React.MouseEvent, edgeId: string) => {
+      e.stopPropagation();
+      selectNode(edgeId, e.shiftKey);
   };
 
   const handleAddNode = (type: NodeType) => {
@@ -151,6 +237,8 @@ const Canvas: React.FC = () => {
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
     >
       {/* Grid Pattern */}
       <div 
@@ -175,23 +263,50 @@ const Canvas: React.FC = () => {
             <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
               <polygon points="0 0, 10 3.5, 0 7" fill="#6366f1" />
             </marker>
+             <marker id="arrowhead-selected" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <polygon points="0 0, 10 3.5, 0 7" fill="#f43f5e" />
+            </marker>
           </defs>
+          
+          {/* Existing Edges */}
           {edges.map(edge => {
             const start = getNodeHandlePosition(edge.sourceNodeId, edge.sourceHandleId, 'output');
             const end = getNodeHandlePosition(edge.targetNodeId, undefined, 'input');
+            const isSelected = selectedIds.includes(edge.id);
+            
             return (
-              <g key={edge.id}>
+              <g key={edge.id} className="pointer-events-auto cursor-pointer" onClick={(e) => handleEdgeClick(e, edge.id)}>
+                {/* Hit area */}
                 <path
                   d={getBezierPath(start, end, 80)}
-                  stroke="#4f46e5"
-                  strokeWidth="2"
+                  stroke="transparent"
+                  strokeWidth="15"
                   fill="none"
-                  markerEnd="url(#arrowhead)"
-                  className="opacity-60 hover:opacity-100 transition-opacity"
+                />
+                {/* Visible Path */}
+                <path
+                  d={getBezierPath(start, end, 80)}
+                  stroke={isSelected ? "#f43f5e" : "#4f46e5"}
+                  strokeWidth={isSelected ? "3" : "2"}
+                  fill="none"
+                  markerEnd={isSelected ? "url(#arrowhead-selected)" : "url(#arrowhead)"}
+                  className="transition-colors duration-150"
+                  style={{ opacity: isSelected ? 1 : 0.6 }}
                 />
               </g>
             );
           })}
+
+          {/* Temporary Link Line */}
+          {linkingState && (
+              <path
+                d={getBezierPath(linkingState.startPos, linkingState.mousePos, 80)}
+                stroke="#6366f1"
+                strokeWidth="2"
+                strokeDasharray="5,5"
+                fill="none"
+              />
+          )}
         </svg>
 
         {/* Nodes Layer */}
@@ -212,11 +327,17 @@ const Canvas: React.FC = () => {
             }}
           >
             {/* Input Handle (Left) */}
-            <div className="absolute left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 w-3 h-3 bg-zinc-600 border border-zinc-900 rounded-full hover:bg-indigo-500 z-10" />
+            <div 
+                className="absolute left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 bg-zinc-600 border border-zinc-900 rounded-full hover:bg-indigo-500 z-20 cursor-crosshair transition-transform hover:scale-125" 
+                onMouseUp={(e) => handleInputMouseUp(e, node.id)}
+            />
 
             {/* Default Output Handle (Right) - Only if not a choice node or if needed as fallback */}
             {node.type !== NodeType.DIALOGUE && (
-               <div className="absolute right-0 top-1/2 translate-x-1/2 -translate-y-1/2 w-3 h-3 bg-zinc-600 border border-zinc-900 rounded-full hover:bg-indigo-500 z-10" />
+               <div 
+                className="absolute right-0 top-1/2 translate-x-1/2 -translate-y-1/2 w-4 h-4 bg-zinc-600 border border-zinc-900 rounded-full hover:bg-indigo-500 z-20 cursor-crosshair transition-transform hover:scale-125" 
+                onMouseDown={(e) => handleHandleMouseDown(e, node.id)}
+               />
             )}
 
             {/* Node Header */}
@@ -244,7 +365,10 @@ const Canvas: React.FC = () => {
                             {c.text}
                           </div>
                           {/* Output Handle for Choice */}
-                          <div className="absolute -right-[18px] w-3 h-3 bg-indigo-600 border border-zinc-900 rounded-full hover:scale-125 transition-transform" />
+                          <div 
+                            className="absolute -right-[18px] w-3 h-3 bg-indigo-600 border border-zinc-900 rounded-full hover:scale-125 transition-transform cursor-crosshair z-20"
+                            onMouseDown={(e) => handleHandleMouseDown(e, node.id, c.id)}
+                          />
                       </div>
                     ))}
                   </div>
@@ -267,19 +391,23 @@ const Canvas: React.FC = () => {
       </div>
 
       {/* Toolbar HUD */}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-zinc-800 rounded-lg shadow-xl border border-zinc-700 flex items-center p-1 gap-1">
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-zinc-800 rounded-lg shadow-xl border border-zinc-700 flex items-center p-1 gap-1 z-30">
         <button className="p-2 hover:bg-zinc-700 rounded text-white" title="选择 (V)"><MousePointer2 className="w-4 h-4" /></button>
         <div className="w-px h-4 bg-zinc-700 mx-1"></div>
         <button 
-          className="p-2 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white" 
-          title="新建对话"
+          draggable
+          onDragStart={(e) => onDragStart(e, NodeType.DIALOGUE)}
+          className="p-2 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white cursor-grab active:cursor-grabbing" 
+          title="新建对话 (拖拽或点击)"
           onClick={() => handleAddNode(NodeType.DIALOGUE)}
         >
           <Type className="w-4 h-4" />
         </button>
         <button 
-          className="p-2 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white"
-          title="新建场景"
+          draggable
+          onDragStart={(e) => onDragStart(e, NodeType.LOCATION)}
+          className="p-2 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white cursor-grab active:cursor-grabbing"
+          title="新建场景 (拖拽或点击)"
           onClick={() => handleAddNode(NodeType.LOCATION)}
         >
           <ImageIcon className="w-4 h-4" />
@@ -287,7 +415,7 @@ const Canvas: React.FC = () => {
       </div>
 
       {/* Zoom Controls HUD */}
-      <div className="absolute bottom-4 left-4 flex flex-col gap-2">
+      <div className="absolute bottom-4 left-4 flex flex-col gap-2 z-30">
          <div className="bg-zinc-800 rounded-md shadow-lg border border-zinc-700 flex flex-col p-1">
             <button 
               className="p-1.5 hover:bg-zinc-700 rounded text-zinc-400"

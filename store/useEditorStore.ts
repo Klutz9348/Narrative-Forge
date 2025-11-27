@@ -4,7 +4,7 @@ import { StoryAsset, NodeType, NarrativeNode, Edge } from '../types';
 import { CommandBus } from '../engine/CommandBus';
 import { AssetManager } from '../engine/AssetManager';
 import { SelectionManager } from '../engine/SelectionManager';
-import { UpdateNodeCommand, AddNodeCommand, RemoveNodeCommand } from '../engine/commands';
+import { UpdateNodeCommand, AddNodeCommand, RemoveNodeCommand, AddEdgeCommand, RemoveEdgeCommand } from '../engine/commands';
 
 // --- Initial Data ---
 
@@ -100,6 +100,12 @@ interface EditorState {
   addNode: (type: NodeType, position: {x:number, y:number}) => void;
   removeNode: (id: string) => void;
 
+  // Edge Manipulation
+  addEdge: (sourceId: string, targetId: string, sourceHandleId?: string) => void;
+  removeEdge: (id: string) => void;
+
+  deleteSelection: () => void;
+
   setCanvasTransform: (transform: { x: number; y: number; scale: number }) => void;
   
   // Command Bus
@@ -184,7 +190,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
         const currentNodeData = activeSeg.nodes[editingNodeId];
         
         // Detect if changes actually happened
-        // Simple JSON stringify comparison for MVP
         if (JSON.stringify(originalNodeData) !== JSON.stringify(currentNodeData)) {
             const command = new UpdateNodeCommand(
                 editingNodeId,
@@ -193,13 +198,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
                 activeSeg.id,
                 set
             );
-            // We don't execute() because the state is already updated (transiently)
-            // But we need to register it in the stack. 
-            // Wait, standard Command pattern requires execute() to do the work.
-            // But here the work is done. 
-            // We can treat the 'execute' as idempotent or simply push to stack manually?
-            // CommandBus.execute calls execute().
-            // Let's allow the command to re-set the state (it's safe).
             commandBus.execute(command);
             syncCommandState();
         }
@@ -223,6 +221,66 @@ export const useEditorStore = create<EditorState>((set, get) => {
         const node = activeSeg.nodes[id];
         const command = new RemoveNodeCommand(id, node, activeSeg.id, set);
         commandBus.execute(command);
+        syncCommandState();
+    },
+
+    addEdge: (sourceId: string, targetId: string, sourceHandleId?: string) => {
+      const state = get();
+      const activeSeg = state.story.segments.find(s => s.id === state.story.activeSegmentId);
+      if (!activeSeg) return;
+
+      // Prevent duplicate edges
+      const exists = activeSeg.edges.some(e => 
+          e.sourceNodeId === sourceId && 
+          e.targetNodeId === targetId && 
+          e.sourceHandleId === sourceHandleId
+      );
+      if (exists) return;
+
+      const newEdge = AssetManager.createEdge(sourceId, targetId, sourceHandleId);
+      const command = new AddEdgeCommand(newEdge, activeSeg.id, set);
+      commandBus.execute(command);
+      syncCommandState();
+    },
+
+    removeEdge: (id: string) => {
+        const state = get();
+        const activeSeg = state.story.segments.find(s => s.id === state.story.activeSegmentId);
+        if (!activeSeg) return;
+        const edge = activeSeg.edges.find(e => e.id === id);
+        if (!edge) return;
+
+        const command = new RemoveEdgeCommand(id, edge, activeSeg.id, set);
+        commandBus.execute(command);
+        syncCommandState();
+    },
+
+    deleteSelection: () => {
+        const state = get();
+        const { selectedIds, story } = state;
+        if (selectedIds.length === 0) return;
+
+        const activeSeg = story.segments.find(s => s.id === story.activeSegmentId);
+        if (!activeSeg) return;
+
+        selectedIds.forEach(id => {
+            // Check if it's a node
+            if (activeSeg.nodes[id]) {
+                const node = activeSeg.nodes[id];
+                const command = new RemoveNodeCommand(id, node, activeSeg.id, set);
+                commandBus.execute(command);
+            } 
+            // Check if it's an edge
+            else {
+                const edge = activeSeg.edges.find(e => e.id === id);
+                if (edge) {
+                    const command = new RemoveEdgeCommand(id, edge, activeSeg.id, set);
+                    commandBus.execute(command);
+                }
+            }
+        });
+        
+        state.clearSelection();
         syncCommandState();
     },
 

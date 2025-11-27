@@ -52,6 +52,7 @@ export class AddNodeCommand implements ICommand {
 export class RemoveNodeCommand implements ICommand {
   id = Math.random().toString(36);
   name = "Remove Node";
+  private removedEdges: Edge[] = [];
 
   constructor(
     private nodeId: string,
@@ -66,11 +67,20 @@ export class RemoveNodeCommand implements ICommand {
       const segmentIndex = story.segments.findIndex(s => s.id === this.segmentId);
       if (segmentIndex === -1) return state;
 
-      const newSegments = [...story.segments];
-      const newNodes = { ...newSegments[segmentIndex].nodes };
+      const segment = story.segments[segmentIndex];
+      
+      // Find connected edges
+      const connectedEdges = segment.edges.filter(
+        e => e.sourceNodeId === this.nodeId || e.targetNodeId === this.nodeId
+      );
+      this.removedEdges = connectedEdges;
+
+      const newEdges = segment.edges.filter(e => !connectedEdges.includes(e));
+      const newNodes = { ...segment.nodes };
       delete newNodes[this.nodeId];
       
-      newSegments[segmentIndex] = { ...newSegments[segmentIndex], nodes: newNodes };
+      const newSegments = [...story.segments];
+      newSegments[segmentIndex] = { ...segment, nodes: newNodes, edges: newEdges };
       return { story: { ...story, segments: newSegments }, selectedIds: [] };
     });
   }
@@ -81,10 +91,22 @@ export class RemoveNodeCommand implements ICommand {
       const segmentIndex = story.segments.findIndex(s => s.id === this.segmentId);
       if (segmentIndex === -1) return state;
 
+      const segment = story.segments[segmentIndex];
       const newSegments = [...story.segments];
+      
+      // Restore node
+      const newNodes = { ...segment.nodes, [this.nodeId]: this.nodeData };
+      
+      // Restore edges
+      // We check existence to avoid duplication, though unlikely with proper undo flow
+      const currentEdgeIds = new Set(segment.edges.map(e => e.id));
+      const edgesToRestore = this.removedEdges.filter(e => !currentEdgeIds.has(e.id));
+      const newEdges = [...segment.edges, ...edgesToRestore];
+
       newSegments[segmentIndex] = {
-        ...newSegments[segmentIndex],
-        nodes: { ...newSegments[segmentIndex].nodes, [this.nodeId]: this.nodeData }
+        ...segment,
+        nodes: newNodes,
+        edges: newEdges
       };
 
       return { story: { ...story, segments: newSegments } };
@@ -203,7 +225,7 @@ export class RemoveEdgeCommand implements ICommand {
                 ...newSegments[segmentIndex],
                 edges: newSegments[segmentIndex].edges.filter(e => e.id !== this.edgeId)
             };
-            return { story: { ...story, segments: newSegments } };
+            return { story: { ...story, segments: newSegments }, selectedIds: [] };
         });
     }
 
