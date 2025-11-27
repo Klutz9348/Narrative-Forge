@@ -89,21 +89,15 @@ interface EditorState {
   clearSelection: () => void;
   
   // Node Manipulation
-  // Direct/Transient update (for high frequency events like dragging/typing)
   updateNode: (id: string, data: Partial<NarrativeNode>) => void;
-  
-  // Transactional Actions (start/commit edits to create Commands)
   startEditing: (id: string) => void;
   commitEditing: () => void;
   
-  // Structural Actions
+  // CRUD
   addNode: (type: NodeType, position: {x:number, y:number}) => void;
   removeNode: (id: string) => void;
-
-  // Edge Manipulation
   addEdge: (sourceId: string, targetId: string, sourceHandleId?: string) => void;
   removeEdge: (id: string) => void;
-
   deleteSelection: () => void;
 
   setCanvasTransform: (transform: { x: number; y: number; scale: number }) => void;
@@ -120,7 +114,6 @@ const commandBus = new CommandBus();
 
 export const useEditorStore = create<EditorState>((set, get) => {
   
-  // Helper to trigger UI update after command execution
   const syncCommandState = () => {
     set({ 
       canUndo: commandBus.canUndo(),
@@ -173,7 +166,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         if (activeSeg && activeSeg.nodes[id]) {
             set({ 
                 editingNodeId: id, 
-                originalNodeData: { ...activeSeg.nodes[id] } // Shallow clone sufficient for now
+                originalNodeData: { ...activeSeg.nodes[id] } // Shallow clone
             });
         }
     },
@@ -189,7 +182,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
         const currentNodeData = activeSeg.nodes[editingNodeId];
         
-        // Detect if changes actually happened
         if (JSON.stringify(originalNodeData) !== JSON.stringify(currentNodeData)) {
             const command = new UpdateNodeCommand(
                 editingNodeId,
@@ -229,7 +221,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const activeSeg = state.story.segments.find(s => s.id === state.story.activeSegmentId);
       if (!activeSeg) return;
 
-      // Prevent duplicate edges
       const exists = activeSeg.edges.some(e => 
           e.sourceNodeId === sourceId && 
           e.targetNodeId === targetId && 
@@ -264,14 +255,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
         if (!activeSeg) return;
 
         selectedIds.forEach(id => {
-            // Check if it's a node
             if (activeSeg.nodes[id]) {
                 const node = activeSeg.nodes[id];
                 const command = new RemoveNodeCommand(id, node, activeSeg.id, set);
                 commandBus.execute(command);
-            } 
-            // Check if it's an edge
-            else {
+            } else {
                 const edge = activeSeg.edges.find(e => e.id === id);
                 if (edge) {
                     const command = new RemoveEdgeCommand(id, edge, activeSeg.id, set);

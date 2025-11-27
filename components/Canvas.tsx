@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { MousePointer2, Type, Image as ImageIcon, ZoomIn, ZoomOut, Zap } from 'lucide-react';
+import { MousePointer2, Type, Image as ImageIcon, ZoomIn, ZoomOut } from 'lucide-react';
 import { NodeType, NarrativeNode, Vector2, DialogueNode } from '../types';
 import { useEditorStore } from '../store/useEditorStore';
 
@@ -126,7 +126,8 @@ const Canvas: React.FC = () => {
     }
     setIsPanning(false);
     setDragState(null);
-    setLinkingState(null); // Cancel linking if dropped on canvas
+    // If linking was active and mouse up happened on canvas (not on a node), cancel it
+    setLinkingState(null); 
   };
 
   // --- Drag and Drop Creation Handlers ---
@@ -170,8 +171,9 @@ const Canvas: React.FC = () => {
   };
 
   const handleHandleMouseDown = (e: React.MouseEvent, nodeId: string, handleId?: string) => {
-     e.stopPropagation();
-     // Prevent starting link if dragging node
+     e.preventDefault(); // Prevent text selection
+     e.stopPropagation(); // Prevent node dragging
+     
      const startPos = getNodeHandlePosition(nodeId, handleId, 'output');
      setLinkingState({
          sourceNodeId: nodeId,
@@ -197,15 +199,14 @@ const Canvas: React.FC = () => {
   };
 
   const handleAddNode = (type: NodeType) => {
-    // Add to center of screen accounting for transform
     const centerX = (-canvasTransform.x + window.innerWidth / 2) / canvasTransform.scale;
     const centerY = (-canvasTransform.y + window.innerHeight / 2) / canvasTransform.scale;
-    addNode(type, { x: centerX, y: centerY });
+    addNode(type, { x: centerX - 150, y: centerY - 100 });
   };
 
   // --- Rendering Helpers ---
 
-  // Calculate handle positions for edges
+  // Calculate handle positions with bottom-up logic for alignment reliability
   const getNodeHandlePosition = (nodeId: string, handleId?: string, type: 'input' | 'output' = 'output') => {
     const node = activeSegment?.nodes[nodeId];
     if (!node) return { x: 0, y: 0 };
@@ -215,15 +216,26 @@ const Canvas: React.FC = () => {
     } else {
       // Output
       if (node.type === NodeType.DIALOGUE && handleId) {
-        // Find which choice index this is
-        const choiceIndex = (node as DialogueNode).choices.findIndex(c => c.id === handleId);
-        const offsetPerChoice = 24;
-        const startY = node.size.y - ((node as DialogueNode).choices.length * offsetPerChoice) - 10; 
+        const choices = (node as DialogueNode).choices;
+        const choiceIndex = choices.findIndex(c => c.id === handleId);
+        if (choiceIndex === -1) return { x: node.position.x + node.size.x, y: node.position.y };
+        
+        // Visual Logic Sync:
+        // Padding Bottom: 12px (p-3)
+        // Item Height: 24px (h-6)
+        // Item Gap: 4px (space-y-1)
+        // Handle is vertically centered in Item (12px from item bottom)
+        
+        // Calculate offset from the bottom of the node
+        const reverseIndex = choices.length - 1 - choiceIndex;
+        const offsetFromBottom = 12 + (reverseIndex * 28) + 12; // 12px padding + N * (24+4) + 12px center
+        
         return { 
             x: node.position.x + node.size.x, 
-            y: node.position.y + startY + (choiceIndex * offsetPerChoice) + 10
+            y: node.position.y + node.size.y - offsetFromBottom
         };
       }
+      // Default output (center right) for Location/Branch or fallback
       return { x: node.position.x + node.size.x, y: node.position.y + node.size.y / 2 };
     }
   };
@@ -268,7 +280,6 @@ const Canvas: React.FC = () => {
             </marker>
           </defs>
           
-          {/* Existing Edges */}
           {edges.map(edge => {
             const start = getNodeHandlePosition(edge.sourceNodeId, edge.sourceHandleId, 'output');
             const end = getNodeHandlePosition(edge.targetNodeId, undefined, 'input');
@@ -276,14 +287,12 @@ const Canvas: React.FC = () => {
             
             return (
               <g key={edge.id} className="pointer-events-auto cursor-pointer" onClick={(e) => handleEdgeClick(e, edge.id)}>
-                {/* Hit area */}
                 <path
                   d={getBezierPath(start, end, 80)}
                   stroke="transparent"
                   strokeWidth="15"
                   fill="none"
                 />
-                {/* Visible Path */}
                 <path
                   d={getBezierPath(start, end, 80)}
                   stroke={isSelected ? "#f43f5e" : "#4f46e5"}
@@ -297,7 +306,6 @@ const Canvas: React.FC = () => {
             );
           })}
 
-          {/* Temporary Link Line */}
           {linkingState && (
               <path
                 d={getBezierPath(linkingState.startPos, linkingState.mousePos, 80)}
@@ -314,6 +322,7 @@ const Canvas: React.FC = () => {
           <div
             key={node.id}
             onMouseDown={(e) => handleNodeMouseDown(e, node)}
+            onMouseUp={(e) => handleInputMouseUp(e, node.id)} // Allow dropping anywhere on node to connect
             className={`absolute border transition-shadow duration-150 group flex flex-col
               ${selectedIds.includes(node.id) ? 'border-indigo-500 ring-1 ring-indigo-500 shadow-xl' : 'border-zinc-700 hover:border-zinc-500'}
               bg-zinc-800 rounded-md overflow-hidden
@@ -332,7 +341,7 @@ const Canvas: React.FC = () => {
                 onMouseUp={(e) => handleInputMouseUp(e, node.id)}
             />
 
-            {/* Default Output Handle (Right) - Only if not a choice node or if needed as fallback */}
+            {/* Default Output Handle (Right) - Hidden for Dialogue nodes with choices */}
             {node.type !== NodeType.DIALOGUE && (
                <div 
                 className="absolute right-0 top-1/2 translate-x-1/2 -translate-y-1/2 w-4 h-4 bg-zinc-600 border border-zinc-900 rounded-full hover:bg-indigo-500 z-20 cursor-crosshair transition-transform hover:scale-125" 
@@ -349,30 +358,32 @@ const Canvas: React.FC = () => {
             </div>
 
             {/* Node Content */}
-            <div className="p-3 text-zinc-300 text-xs flex-1 overflow-hidden relative">
+            <div className="p-3 text-zinc-300 text-xs flex-1 overflow-hidden relative flex flex-col">
               {node.type === NodeType.DIALOGUE ? (
-                <div className="flex flex-col h-full">
-                  <div className="font-bold text-zinc-500 mb-1">
+                <>
+                  <div className="font-bold text-zinc-500 mb-1 shrink-0">
                     {story.characters.find(c => c.id === (node as DialogueNode).characterId)?.name}
                   </div>
-                  <div className="italic opacity-80 line-clamp-3 mb-2 flex-1">"{(node as DialogueNode).text}"</div>
+                  <div className="italic opacity-80 line-clamp-3 mb-2 flex-1 min-h-0">
+                    "{(node as DialogueNode).text}"
+                  </div>
                   
-                  {/* Choices rendering matching visual handles */}
-                  <div className="space-y-1 mt-auto">
+                  {/* Choices rendering matching visual handles logic */}
+                  <div className="space-y-1 mt-auto shrink-0">
                     {(node as DialogueNode).choices?.map((c, idx) => (
-                      <div key={c.id} className="relative flex items-center justify-end">
+                      <div key={c.id} className="relative flex items-center justify-end h-6 shrink-0 group/choice">
                          <div className="bg-black/20 px-2 py-1 rounded text-[10px] text-indigo-300 border border-indigo-500/20 w-full text-right truncate">
                             {c.text}
                           </div>
-                          {/* Output Handle for Choice */}
+                          {/* Output Handle for Choice - Vertically Centered relative to this item */}
                           <div 
-                            className="absolute -right-[18px] w-3 h-3 bg-indigo-600 border border-zinc-900 rounded-full hover:scale-125 transition-transform cursor-crosshair z-20"
+                            className="absolute -right-[18px] top-1/2 -translate-y-1/2 w-3 h-3 bg-indigo-600 border border-zinc-900 rounded-full hover:scale-125 transition-transform cursor-crosshair z-20"
                             onMouseDown={(e) => handleHandleMouseDown(e, node.id, c.id)}
                           />
                       </div>
                     ))}
                   </div>
-                </div>
+                </>
               ) : (
                 <div className="w-full h-full relative">
                    <img 
