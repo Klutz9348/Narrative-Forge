@@ -18,6 +18,7 @@ const Canvas: React.FC = () => {
     selectedIds, 
     canvasTransform, 
     selectNode, 
+    clearSelection,
     updateNode, 
     setCanvasTransform,
     pushHistory 
@@ -57,7 +58,7 @@ const Canvas: React.FC = () => {
       setPanStart({ x: e.clientX, y: e.clientY });
     } else if (e.target === containerRef.current) {
         // Click on empty space
-        selectNode('', false); // Clear selection by passing empty id, or we need a clearSelection action
+        clearSelection();
     }
   };
 
@@ -117,12 +118,6 @@ const Canvas: React.FC = () => {
       if (node.type === NodeType.DIALOGUE && handleId) {
         // Find which choice index this is
         const choiceIndex = (node as DialogueNode).choices.findIndex(c => c.id === handleId);
-        // Estimate position based on choice list rendered height. This is an approximation.
-        // A better way is using refs to actual DOM elements, but for MVP we approximate.
-        // Header ~24px, Padding ~12px, Text ~variable.
-        // Let's just distribute handles along the right side for now or fix them.
-        // Simple approximation: Distribute evenly or place at specific estimated height.
-        // Let's try placing them relative to the bottom half of the node.
         const offsetPerChoice = 24;
         const startY = node.size.y - ((node as DialogueNode).choices.length * offsetPerChoice) - 10; 
         return { 
@@ -275,7 +270,7 @@ const Canvas: React.FC = () => {
             >
               <ZoomIn className="w-4 h-4" />
             </button>
-            <div className="h-px w-4 bg-zinc-700 mx-auto"></div>
+            <div className="h-px w-4 bg-zinc-700 mx-1"></div>
             <button 
               className="p-1.5 hover:bg-zinc-700 rounded text-zinc-400"
               onClick={() => setCanvasTransform({...canvasTransform, scale: Math.max(canvasTransform.scale - 0.1, 0.1)})}

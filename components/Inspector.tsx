@@ -12,7 +12,7 @@ const NODE_TYPE_LABELS: Record<NodeType, string> = {
 };
 
 const Inspector: React.FC = () => {
-  const { story, selectedIds, updateNode } = useEditorStore();
+  const { story, selectedIds, updateNode, pushHistory } = useEditorStore();
   
   const activeSegment = story.segments.find(s => s.id === story.activeSegmentId);
   const selectedNode = selectedIds.length === 1 && activeSegment ? activeSegment.nodes[selectedIds[0]] : null;
@@ -55,6 +55,7 @@ const Inspector: React.FC = () => {
           type="text" 
           value={selectedNode.name}
           onChange={(e) => updateNode(selectedNode.id, { name: e.target.value })}
+          onBlur={pushHistory}
           className="bg-transparent text-lg font-bold text-white w-full focus:outline-none focus:ring-1 focus:ring-indigo-500 rounded px-1 -ml-1"
         />
       </div>
@@ -70,6 +71,7 @@ const Inspector: React.FC = () => {
                 type="number" 
                 value={selectedNode.position.x}
                 onChange={(e) => updateNode(selectedNode.id, { position: { ...selectedNode.position, x: parseInt(e.target.value) || 0 } })}
+                onBlur={pushHistory}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-300"
               />
             </div>
@@ -79,6 +81,7 @@ const Inspector: React.FC = () => {
                 type="number" 
                 value={selectedNode.position.y}
                 onChange={(e) => updateNode(selectedNode.id, { position: { ...selectedNode.position, y: parseInt(e.target.value) || 0 } })}
+                onBlur={pushHistory}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-300"
               />
             </div>
@@ -88,6 +91,7 @@ const Inspector: React.FC = () => {
                 type="number" 
                 value={selectedNode.size.x}
                 onChange={(e) => updateNode(selectedNode.id, { size: { ...selectedNode.size, x: parseInt(e.target.value) || 0 } })}
+                onBlur={pushHistory}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-300"
               />
             </div>
@@ -97,6 +101,7 @@ const Inspector: React.FC = () => {
                 type="number" 
                 value={selectedNode.size.y}
                 onChange={(e) => updateNode(selectedNode.id, { size: { ...selectedNode.size, y: parseInt(e.target.value) || 0 } })}
+                onBlur={pushHistory}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-300"
               />
             </div>
@@ -123,6 +128,7 @@ const Inspector: React.FC = () => {
               <select 
                 value={(selectedNode as DialogueNode).characterId}
                 onChange={(e) => updateNode(selectedNode.id, { characterId: e.target.value })}
+                onBlur={pushHistory}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-300 focus:outline-none"
               >
                 {story.characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -135,6 +141,7 @@ const Inspector: React.FC = () => {
                 rows={4}
                 value={(selectedNode as DialogueNode).text}
                 onChange={(e) => updateNode(selectedNode.id, { text: e.target.value })}
+                onBlur={pushHistory}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-2 text-sm text-zinc-300 resize-none focus:ring-1 focus:ring-indigo-500 focus:outline-none"
               />
             </div>
@@ -146,7 +153,10 @@ const Inspector: React.FC = () => {
                   {aiVariations.map((v, i) => (
                     <div 
                       key={i} 
-                      onClick={() => updateNode(selectedNode.id, { text: v })}
+                      onClick={() => {
+                        updateNode(selectedNode.id, { text: v });
+                        pushHistory(); // Commit immediately on selection
+                      }}
                       className="text-xs text-zinc-300 p-2 bg-zinc-800 hover:bg-zinc-700 rounded cursor-pointer border border-zinc-700"
                     >
                       {v}

@@ -75,7 +75,7 @@ interface EditorState {
   selectedIds: string[];
   canvasTransform: { x: number; y: number; scale: number };
   
-  // History for Undo/Redo (Simplified)
+  // History for Undo/Redo (Deep Cloned)
   history: StoryAsset[];
   historyIndex: number;
 
@@ -96,12 +96,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   selectedIds: [],
   canvasTransform: { x: 0, y: 0, scale: 1 },
   
-  history: [INITIAL_STORY],
+  // Initialize history with a deep copy to prevent reference issues
+  history: [JSON.parse(JSON.stringify(INITIAL_STORY))],
   historyIndex: 0,
 
-  selectNode: (id, multi = false) => set(state => ({
-    selectedIds: multi ? [...state.selectedIds, id] : [id]
-  })),
+  selectNode: (id, multi = false) => set(state => {
+    if (!id) return { selectedIds: [] };
+    return {
+      selectedIds: multi ? [...state.selectedIds, id] : [id]
+    };
+  }),
 
   clearSelection: () => set({ selectedIds: [] }),
 
@@ -109,6 +113,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set(state => {
       const activeSeg = state.story.segments.find(s => s.id === state.story.activeSegmentId);
       if (!activeSeg) return state;
+
+      if (!activeSeg.nodes[nodeId]) return state;
 
       const updatedSeg = {
         ...activeSeg,
@@ -120,7 +126,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
       const newStory = {
         ...state.story,
-        segments: state.story.segments.map(s => s.id === s.id ? updatedSeg : s)
+        // Fix: Only update the active segment
+        segments: state.story.segments.map(s => s.id === activeSeg.id ? updatedSeg : s)
       };
 
       return { story: newStory };
@@ -130,10 +137,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setCanvasTransform: (transform) => set({ canvasTransform: transform }),
 
   pushHistory: () => set(state => {
-    // When pushing new state, remove any future redo history
+    // Deep clone the current story to isolate history state
+    const snapshot = JSON.parse(JSON.stringify(state.story));
+    
+    // Discard any future history if we are in the middle of the stack
     const newHistory = state.history.slice(0, state.historyIndex + 1);
-    newHistory.push(state.story);
-    // Limit history size if needed
+    newHistory.push(snapshot);
+    
+    // Simple limit to prevent memory issues
     if (newHistory.length > 50) newHistory.shift();
     
     return {
@@ -145,8 +156,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   undo: () => set(state => {
     if (state.historyIndex > 0) {
       const newIndex = state.historyIndex - 1;
+      // Restore a deep copy to ensure the history record itself isn't mutated by subsequent edits
+      const restoredStory = JSON.parse(JSON.stringify(state.history[newIndex]));
       return {
-        story: state.history[newIndex],
+        story: restoredStory,
         historyIndex: newIndex
       };
     }
@@ -156,8 +169,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   redo: () => set(state => {
     if (state.historyIndex < state.history.length - 1) {
       const newIndex = state.historyIndex + 1;
+      // Restore a deep copy
+      const restoredStory = JSON.parse(JSON.stringify(state.history[newIndex]));
       return {
-        story: state.history[newIndex],
+        story: restoredStory,
         historyIndex: newIndex
       };
     }
