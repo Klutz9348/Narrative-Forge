@@ -1,5 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { MousePointer2, Type, Image as ImageIcon, ZoomIn, ZoomOut, GitGraph, Variable, ArrowRightCircle, ChevronDown, Layers, Zap, Clapperboard, Timer, Smartphone, MessageSquare } from 'lucide-react';
+
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { MousePointer2, Type, Image as ImageIcon, ZoomIn, ZoomOut, GitGraph, Variable, ArrowRightCircle, ChevronDown, Layers, Zap, Clapperboard, Timer, Smartphone, MessageSquare, Play } from 'lucide-react';
 import { NodeType, NarrativeNode, Vector2, DialogueNode, BranchNode, VariableSetterNode, JumpNode, LocationNode, ActionNode, Hotspot } from '../types';
 import { useEditorStore } from '../store/useEditorStore';
 
@@ -11,6 +12,113 @@ const getBezierPath = (
 ) => {
   return `M${start.x},${start.y} C${start.x + controlOffset},${start.y} ${end.x - controlOffset},${end.y} ${end.x},${end.y}`;
 };
+
+// Layout Constants
+const LAYOUT = {
+  BORDER: 1,
+  HEADER_HEIGHT: 24,
+  PADDING: 12,
+  ITEM_HEIGHT: 24,
+  ITEM_GAP: 4,
+  BRANCH_GAP: 8
+};
+
+interface NodeComponentProps {
+  node: NarrativeNode;
+  selected: boolean;
+  onMouseDown: (e: React.MouseEvent, node: NarrativeNode) => void;
+  onMouseUp: (e: React.MouseEvent, nodeId: string) => void;
+  onHandleMouseDown: (e: React.MouseEvent, nodeId: string, handleId?: string) => void;
+  renderContent: (node: NarrativeNode) => React.ReactNode;
+  getNodeColorClass: (type: NodeType) => string;
+  getNodeIcon: (type: NodeType) => React.ReactNode;
+}
+
+const NodeComponent: React.FC<NodeComponentProps> = React.memo(({ 
+    node, selected, onMouseDown, onMouseUp, onHandleMouseDown, renderContent, getNodeColorClass, getNodeIcon 
+}) => {
+    const elementRef = useRef<HTMLDivElement>(null);
+    const { updateNode } = useEditorStore();
+    
+    // Auto-resize Logic: Sync DOM height to Store
+    useEffect(() => {
+        if(!elementRef.current) return;
+        
+        const observer = new ResizeObserver(() => {
+            // Wrap in requestAnimationFrame to avoid "ResizeObserver loop completed with undelivered notifications"
+            // This error occurs when the observation callback triggers a change that is observed in the same frame.
+            window.requestAnimationFrame(() => {
+                const el = elementRef.current;
+                if (el) {
+                    // Use offsetHeight to include padding/border which matches visual height
+                    const h = el.offsetHeight;
+                    // Only update if difference is significant to avoid rounding jitter
+                    if (Math.abs(h - node.size.y) > 1) {
+                        // Update store (this will trigger re-render of edges)
+                        updateNode(node.id, { size: { ...node.size, y: h } });
+                    }
+                }
+            });
+        });
+        observer.observe(elementRef.current);
+        return () => observer.disconnect();
+    }, [node.id, node.size.y, updateNode]);
+
+    const isDialogue = node.type === NodeType.DIALOGUE;
+    const isBranch = node.type === NodeType.BRANCH;
+    const isLocation = node.type === NodeType.LOCATION;
+    const isStart = node.type === NodeType.START;
+
+    const hasChoices = isDialogue && (node as DialogueNode).choices && (node as DialogueNode).choices.length > 0;
+    const showDefaultHandle = !isBranch && !isLocation && !hasChoices;
+    const showInputHandle = !isStart; // Start node has no input
+
+    return (
+        <div
+            ref={elementRef}
+            onMouseDown={(e) => onMouseDown(e, node)}
+            onMouseUp={(e) => onMouseUp(e, node.id)}
+            className={`absolute border transition-shadow duration-150 group flex flex-col pointer-events-auto
+              ${selected ? 'border-indigo-500 ring-1 ring-indigo-500 shadow-xl' : 'border-zinc-700 hover:border-zinc-500'}
+              bg-zinc-800 rounded-md
+            `}
+            style={{
+              left: node.position.x,
+              top: node.position.y,
+              width: node.size.x,
+              // height is AUTO to allow growth
+              cursor: 'grab'
+            }}
+        >
+             {/* Input Handle */}
+            {showInputHandle && (
+              <div 
+                  className="absolute left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 bg-zinc-600 border border-zinc-900 rounded-full hover:bg-indigo-500 z-20 cursor-crosshair transition-transform hover:scale-125" 
+                  onMouseUp={(e) => onMouseUp(e, node.id)}
+              />
+            )}
+
+            {/* Output Handle */}
+            {showDefaultHandle && (
+              <div 
+                className="absolute right-0 top-1/2 translate-x-1/2 -translate-y-1/2 w-4 h-4 bg-zinc-600 border border-zinc-900 rounded-full hover:bg-indigo-500 z-20 cursor-crosshair transition-transform hover:scale-125" 
+                onMouseDown={(e) => onHandleMouseDown(e, node.id)}
+              />
+            )}
+
+            {/* Header */}
+            <div className={`h-[24px] px-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider shrink-0 ${getNodeColorClass(node.type)}`}>
+              {getNodeIcon(node.type)}
+              <span className="truncate flex-1">{node.name}</span>
+            </div>
+
+            {/* Content */}
+            <div className="p-[12px] text-zinc-300 text-xs flex-1 relative flex flex-col">
+               {renderContent(node)}
+            </div>
+        </div>
+    )
+});
 
 const Canvas: React.FC = () => {
   const { 
@@ -70,7 +178,6 @@ const Canvas: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // --- CRITICAL: State Ref for Global Listeners ---
-  // We use this to bypass React's closure staleness and async updates in event listeners.
   const stateRef = useRef({
     canvasTransform,
     dragState,
@@ -82,7 +189,6 @@ const Canvas: React.FC = () => {
     story
   });
 
-  // Keep Ref in sync with React state for reads that happen later (passive updates)
   useEffect(() => {
     stateRef.current = { 
       canvasTransform, 
@@ -111,10 +217,8 @@ const Canvas: React.FC = () => {
   // --- Global Window Event Listeners ---
   useEffect(() => {
     const handleWindowMouseMove = (e: MouseEvent) => {
-      // Always read from the Ref to get the absolute latest state
       const current = stateRef.current;
       
-      // Safety Check: If buttons are 0 (mouse released), force cleanup.
       if (e.buttons === 0 && (current.dragState || current.isPanning || current.hotspotDragState || current.hotspotResizeState)) {
          handleWindowMouseUp(e);
          return;
@@ -143,11 +247,9 @@ const Canvas: React.FC = () => {
         });
       }
       else if (current.hotspotDragState) {
-        // Hotspot Move Logic
         const dx = (e.clientX - current.hotspotDragState.startX) / current.canvasTransform.scale;
         const dy = (e.clientY - current.hotspotDragState.startY) / current.canvasTransform.scale;
 
-        // Convert pixel delta to percentage delta relative to node size
         const dxPercent = (dx / current.hotspotDragState.nodeSize.x) * 100;
         const dyPercent = (dy / current.hotspotDragState.nodeSize.y) * 100;
 
@@ -168,7 +270,6 @@ const Canvas: React.FC = () => {
         }
       }
       else if (current.hotspotResizeState) {
-        // Hotspot Resize Logic
         const { startX, startY, initialRect, nodeSize, handle, nodeId, hotspotId } = current.hotspotResizeState;
         
         const dx = (e.clientX - startX) / current.canvasTransform.scale;
@@ -179,7 +280,6 @@ const Canvas: React.FC = () => {
 
         let { x, y, w, h } = initialRect;
 
-        // Calculate new percentages based on handle
         if (handle.includes('e')) {
             w = Math.max(5, initialRect.w + dxPercent);
         }
@@ -199,7 +299,6 @@ const Canvas: React.FC = () => {
             h = initialRect.h - safeDy;
         }
 
-        // Apply boundaries (0-100) - Basic clamping
         if (x < 0) { w += x; x = 0; }
         if (y < 0) { h += y; y = 0; }
         if (x + w > 100) { w = 100 - x; }
@@ -298,8 +397,6 @@ const Canvas: React.FC = () => {
       stateRef.current.isPanning = true;
       stateRef.current.panStart = { x: e.clientX, y: e.clientY };
     } else {
-        // Relaxed check: Any click bubbling here that isn't panning is a background click.
-        // All other interactive elements (Nodes, Edges, HUD) stopPropagation.
         clearSelection();
     }
     setShowLogicMenu(false);
@@ -317,7 +414,7 @@ const Canvas: React.FC = () => {
 
   // --- Node Interactions ---
 
-  const handleNodeMouseDown = (e: React.MouseEvent, node: NarrativeNode) => {
+  const handleNodeMouseDown = useCallback((e: React.MouseEvent, node: NarrativeNode) => {
     e.stopPropagation();
     if (e.button !== 0) return;
     
@@ -334,14 +431,13 @@ const Canvas: React.FC = () => {
     setDragState(newDragState);
     stateRef.current.dragState = newDragState;
     setShowLogicMenu(false);
-  };
+  }, [selectNode, startEditing]);
 
   const handleHotspotMouseDown = (e: React.MouseEvent, nodeId: string, hotspot: Hotspot, nodeSize: Vector2) => {
-    e.stopPropagation(); // Prevent node drag
+    e.stopPropagation(); 
     e.preventDefault(); 
     if (e.button !== 0) return;
 
-    // Select the node so inspector shows properties
     selectNode(nodeId, false);
     startEditing(nodeId);
 
@@ -385,12 +481,79 @@ const Canvas: React.FC = () => {
     stateRef.current.hotspotResizeState = newResizeState;
   };
 
-  const handleHandleMouseDown = (e: React.MouseEvent, nodeId: string, handleId?: string) => {
+  const handleHandleMouseDown = useCallback((e: React.MouseEvent, nodeId: string, handleId?: string) => {
      e.preventDefault(); 
      e.stopPropagation(); 
      
-     const startPos = getNodeHandlePosition(nodeId, handleId, 'output');
-     const mouseCanvasPos = getCanvasMousePos(e.clientX, e.clientY);
+     const node = story.segments.find(s => s.id === story.activeSegmentId)?.nodes[nodeId];
+     if(!node) return;
+
+     // Re-calc helper for this specific event
+     const getPos = (type: 'input' | 'output') => {
+        // Reuse the same logic as render
+        const BORDER = LAYOUT.BORDER;
+        const PADDING = LAYOUT.PADDING;
+        const ITEM_HEIGHT = LAYOUT.ITEM_HEIGHT;
+        const ITEM_GAP = LAYOUT.ITEM_GAP;
+        const BRANCH_GAP = LAYOUT.BRANCH_GAP;
+        const HEADER_HEIGHT = LAYOUT.HEADER_HEIGHT;
+
+        if (type === 'input') {
+            return { x: node.position.x, y: node.position.y + node.size.y / 2 };
+        } else {
+            if (node.type === NodeType.START) {
+              // Start node only has output
+              return { x: node.position.x + node.size.x, y: node.position.y + node.size.y / 2 };
+            }
+            if (node.type === NodeType.DIALOGUE && handleId) {
+                const choices = (node as DialogueNode).choices;
+                const choiceIndex = choices.findIndex(c => c.id === handleId);
+                if (choiceIndex === -1) return { x: node.position.x + node.size.x, y: node.position.y };
+                const reverseIndex = choices.length - 1 - choiceIndex;
+                const offsetFromBottom = BORDER + PADDING + (reverseIndex * (ITEM_HEIGHT + ITEM_GAP)) + (ITEM_HEIGHT / 2);
+                return { x: node.position.x + node.size.x - 2, y: node.position.y + node.size.y - offsetFromBottom };
+            }
+            if (node.type === NodeType.BRANCH) {
+                const conditions = (node as BranchNode).conditions || [];
+                const LABEL_HEIGHT = 16;
+                const LABEL_MARGIN = 8;
+                const listStart = BORDER + HEADER_HEIGHT + PADDING + LABEL_HEIGHT + LABEL_MARGIN;
+                
+                if (handleId) {
+                    const index = conditions.findIndex(c => c.id === handleId);
+                    if (index !== -1) {
+                        const offsetFromTop = listStart + (index * (ITEM_HEIGHT + BRANCH_GAP)) + (ITEM_HEIGHT / 2);
+                        return { x: node.position.x + node.size.x - 2, y: node.position.y + offsetFromTop };
+                    }
+                } else {
+                     let listHeight = conditions.length > 0 ? (conditions.length * ITEM_HEIGHT) + ((conditions.length - 1) * BRANCH_GAP) : ITEM_HEIGHT;
+                     const elseMargin = 8;
+                     const offsetFromTop = listStart + listHeight + elseMargin + (ITEM_HEIGHT / 2);
+                     return { x: node.position.x + node.size.x - 2, y: node.position.y + offsetFromTop };
+                }
+            }
+            if (node.type === NodeType.LOCATION && handleId) {
+                 const events = (node as LocationNode).events || [];
+                 const eventIndex = events.findIndex(e => e.id === handleId);
+                 if (eventIndex === -1) return { x: node.position.x + node.size.x, y: node.position.y };
+                 const reverseIndex = events.length - 1 - eventIndex;
+                 const offsetFromBottom = BORDER + PADDING + (reverseIndex * (ITEM_HEIGHT + ITEM_GAP)) + (ITEM_HEIGHT / 2);
+                 return { x: node.position.x + node.size.x - 2, y: node.position.y + node.size.y - offsetFromBottom };
+            }
+            return { x: node.position.x + node.size.x, y: node.position.y + node.size.y / 2 };
+        }
+     };
+
+     const startPos = getPos('output');
+     
+     // Calc mouse pos
+     const rect = containerRef.current?.getBoundingClientRect();
+     const offsetX = rect ? rect.left : 0;
+     const offsetY = rect ? rect.top : 0;
+     const mouseCanvasPos = {
+        x: (e.clientX - offsetX - canvasTransform.x) / canvasTransform.scale,
+        y: (e.clientY - offsetY - canvasTransform.y) / canvasTransform.scale
+     };
 
      const newLinkingState = {
          sourceNodeId: nodeId,
@@ -402,9 +565,9 @@ const Canvas: React.FC = () => {
      setLinkingState(newLinkingState);
      stateRef.current.linkingState = newLinkingState;
      setShowLogicMenu(false);
-  };
+  }, [story, canvasTransform]);
 
-  const handleInputMouseUp = (e: React.MouseEvent, targetNodeId: string) => {
+  const handleInputMouseUp = useCallback((e: React.MouseEvent, targetNodeId: string) => {
     const currentLinking = stateRef.current.linkingState;
     if (currentLinking) {
         e.stopPropagation(); 
@@ -414,7 +577,7 @@ const Canvas: React.FC = () => {
         setLinkingState(null);
         stateRef.current.linkingState = null;
     }
-  };
+  }, [addEdge]);
 
   const handleEdgeClick = (e: React.MouseEvent, edgeId: string) => {
       e.stopPropagation();
@@ -423,7 +586,6 @@ const Canvas: React.FC = () => {
   };
 
   // --- Drag and Drop Creation ---
-  // ... (Same as before)
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
@@ -461,16 +623,23 @@ const Canvas: React.FC = () => {
     const node = activeSegment?.nodes[nodeId];
     if (!node) return { x: 0, y: 0 };
 
+    const { BORDER, PADDING, ITEM_HEIGHT, ITEM_GAP, BRANCH_GAP, HEADER_HEIGHT } = LAYOUT;
+
     if (type === 'input') {
       return { x: node.position.x, y: node.position.y + node.size.y / 2 };
     } else {
-      // Logic for Multiple Outputs
+      if (node.type === NodeType.START) {
+        return { x: node.position.x + node.size.x, y: node.position.y + node.size.y / 2 };
+      }
+
       if (node.type === NodeType.DIALOGUE && handleId) {
         const choices = (node as DialogueNode).choices;
         const choiceIndex = choices.findIndex(c => c.id === handleId);
         if (choiceIndex === -1) return { x: node.position.x + node.size.x, y: node.position.y };
+        
         const reverseIndex = choices.length - 1 - choiceIndex;
-        const offsetFromBottom = 12 + (reverseIndex * (24 + 4)) + 12;
+        const offsetFromBottom = BORDER + PADDING + (reverseIndex * (ITEM_HEIGHT + ITEM_GAP)) + (ITEM_HEIGHT / 2);
+        
         return { 
             x: node.position.x + node.size.x - 2, 
             y: node.position.y + node.size.y - offsetFromBottom
@@ -479,28 +648,21 @@ const Canvas: React.FC = () => {
 
       if (node.type === NodeType.BRANCH) {
         const conditions = (node as BranchNode).conditions || [];
-        const labelOffset = 24; 
-        const headerOffset = 24 + 12 + labelOffset;
-        const itemHeight = 24;
-        const gap = 8; 
+        const LABEL_HEIGHT = 16;
+        const LABEL_MARGIN = 8;
+        const listStart = BORDER + HEADER_HEIGHT + PADDING + LABEL_HEIGHT + LABEL_MARGIN;
         
         if (handleId) {
             const index = conditions.findIndex(c => c.id === handleId);
             if (index !== -1) {
-                const offsetFromTop = headerOffset + (index * (itemHeight + gap)) + (itemHeight / 2);
-                return {
-                    x: node.position.x + node.size.x - 2,
-                    y: node.position.y + offsetFromTop
-                };
+                const offsetFromTop = listStart + (index * (ITEM_HEIGHT + BRANCH_GAP)) + (ITEM_HEIGHT / 2);
+                return { x: node.position.x + node.size.x - 2, y: node.position.y + offsetFromTop };
             }
         } else {
-             const listHeight = conditions.length * (itemHeight + gap);
-             const elseMargin = 8; 
-             const offsetFromTop = headerOffset + listHeight + elseMargin + (itemHeight / 2);
-             return {
-                x: node.position.x + node.size.x - 2,
-                y: node.position.y + offsetFromTop
-             };
+             let listHeight = conditions.length > 0 ? (conditions.length * ITEM_HEIGHT) + ((conditions.length - 1) * BRANCH_GAP) : ITEM_HEIGHT;
+             const elseMargin = 8;
+             const offsetFromTop = listStart + listHeight + elseMargin + (ITEM_HEIGHT / 2);
+             return { x: node.position.x + node.size.x - 2, y: node.position.y + offsetFromTop };
         }
       }
 
@@ -508,35 +670,41 @@ const Canvas: React.FC = () => {
          const events = (node as LocationNode).events || [];
          const eventIndex = events.findIndex(e => e.id === handleId);
          if (eventIndex === -1) return { x: node.position.x + node.size.x, y: node.position.y };
-
          const reverseIndex = events.length - 1 - eventIndex;
-         const offsetFromBottom = 12 + (reverseIndex * (24 + 4)) + 12;
-
-         return {
-            x: node.position.x + node.size.x - 2,
-            y: node.position.y + node.size.y - offsetFromBottom
-         };
+         const offsetFromBottom = BORDER + PADDING + (reverseIndex * (ITEM_HEIGHT + ITEM_GAP)) + (ITEM_HEIGHT / 2);
+         return { x: node.position.x + node.size.x - 2, y: node.position.y + node.size.y - offsetFromBottom };
       }
 
       return { x: node.position.x + node.size.x, y: node.position.y + node.size.y / 2 };
     }
   };
 
-  // --- Node Content Renderer ---
   const renderNodeContent = (node: NarrativeNode) => {
+    const isSelected = selectedIds.includes(node.id);
+    const { ITEM_HEIGHT, ITEM_GAP } = LAYOUT;
+
     switch (node.type) {
+      case NodeType.START:
+        return (
+          <div className="flex flex-col justify-center h-full">
+            <div className="text-[10px] text-emerald-300 text-center opacity-80">
+              Entry point
+            </div>
+          </div>
+        );
+
       case NodeType.DIALOGUE:
         return (
           <>
             <div className="font-bold text-zinc-500 mb-1 shrink-0">
               {story.characters.find(c => c.id === (node as DialogueNode).characterId)?.name}
             </div>
-            <div className="italic opacity-80 line-clamp-3 mb-2 flex-1 min-h-0">
+            <div className="italic opacity-80 mb-[8px] min-h-[48px] whitespace-pre-wrap">
               "{(node as DialogueNode).text}"
             </div>
-            <div className="flex flex-col gap-[4px] mt-auto shrink-0">
+            <div className="flex flex-col mt-auto shrink-0" style={{ gap: ITEM_GAP }}>
               {(node as DialogueNode).choices?.map((c) => (
-                <div key={c.id} className="relative flex items-center justify-end h-[24px] shrink-0 group/choice">
+                <div key={c.id} className="relative flex items-center justify-end shrink-0 group/choice" style={{ height: ITEM_HEIGHT }}>
                     <div className="bg-black/20 px-2 py-1 rounded text-[10px] text-indigo-300 border border-indigo-500/20 w-full text-right truncate h-full flex items-center justify-end">
                       {c.text}
                     </div>
@@ -552,11 +720,9 @@ const Canvas: React.FC = () => {
       
       case NodeType.LOCATION:
         const locNode = node as LocationNode;
-        const isSelected = selectedIds.includes(node.id);
-
         return (
           <div className="flex flex-col h-full">
-            <div className="w-full flex-1 min-h-0 relative bg-zinc-900 rounded border border-zinc-700/50 overflow-hidden group/image select-none">
+            <div className="w-full aspect-video shrink-0 relative bg-zinc-900 rounded border border-zinc-700/50 overflow-hidden group/image select-none">
                 {locNode.backgroundImage ? (
                   <img 
                     src={locNode.backgroundImage} 
@@ -575,7 +741,7 @@ const Canvas: React.FC = () => {
                      className={`absolute border transition-colors cursor-move z-10 flex items-center justify-center overflow-hidden group/hotspot pointer-events-auto ${
                         isSelected 
                           ? 'border-amber-400 bg-amber-400/10' 
-                          : 'border/image:border-amber-400/30 group-hover/image:border-amber-400/30 hover:!border-amber-400 hover:!bg-amber-400/10'
+                          : 'border-transparent group-hover/image:border-amber-400/30 hover:!border-amber-400 hover:!bg-amber-400/10'
                      }`}
                      style={{
                         left: `${hs.rect.x}%`,
@@ -589,7 +755,6 @@ const Canvas: React.FC = () => {
                         <img src={hs.image} className="w-full h-full object-contain pointer-events-none" draggable={false} />
                      )}
                      
-                     {/* Resize Handles - Only visible on hover or if node selected */}
                      <div className="absolute inset-0 opacity-0 group-hover/hotspot:opacity-100 transition-opacity">
                         <div className="absolute top-0 left-0 w-2 h-2 bg-white border border-black cursor-nwse-resize -translate-x-1/2 -translate-y-1/2" 
                              onMouseDown={(e) => handleHotspotResizeMouseDown(e, node.id, hs, node.size, 'nw')} />
@@ -604,11 +769,11 @@ const Canvas: React.FC = () => {
                 ))}
             </div>
             
-            {/* Event List / Dynamic Ports */}
+            {/* Event List */}
             {locNode.events && locNode.events.length > 0 ? (
-               <div className="flex flex-col gap-[4px] mt-[4px] shrink-0">
+               <div className="flex flex-col mt-[4px] shrink-0" style={{ gap: ITEM_GAP }}>
                  {locNode.events.map(evt => (
-                    <div key={evt.id} className="relative flex items-center justify-between h-[24px] shrink-0">
+                    <div key={evt.id} className="relative flex items-center justify-between shrink-0" style={{ height: ITEM_HEIGHT }}>
                        <div className="flex items-center gap-1.5 px-2 bg-black/20 border border-zinc-700 rounded h-full w-full">
                           <Zap className={`w-3 h-3 ${evt.trigger === 'onClick' ? 'text-amber-400' : 'text-indigo-400'}`} />
                           <span className="text-[10px] text-zinc-300 truncate">{evt.label}</span>
@@ -621,33 +786,42 @@ const Canvas: React.FC = () => {
                  ))}
                </div>
             ) : (
-               <div className="p-1 text-center text-[10px] text-zinc-500 shrink-0">Default Exit</div>
+               <div className="p-1 text-center text-[10px] text-zinc-500 shrink-0 opacity-50">No Events</div>
             )}
           </div>
         );
 
       case NodeType.BRANCH:
+        const branchNode = node as BranchNode;
         return (
           <div className="flex flex-col h-full">
-            <div className="text-[10px] text-zinc-500 mb-2 italic leading-4 h-4">Evaluation Order:</div>
-            <div className="flex flex-col space-y-2">
-              {(node as BranchNode).conditions?.map((c, idx) => (
-                <div key={c.id} className="relative flex items-center h-6 shrink-0">
-                  <div className="bg-black/20 px-2 rounded text-[10px] text-amber-300 border border-amber-500/20 w-full truncate font-mono h-full flex items-center">
-                    {idx + 1}. {c.expression}
+            <div className="text-[10px] text-zinc-500 mb-[8px] italic leading-[16px] h-[16px] block shrink-0 whitespace-nowrap overflow-hidden">Evaluation Order:</div>
+            
+            <div className="flex flex-col" style={{ gap: LAYOUT.BRANCH_GAP }}>
+              {branchNode.conditions?.map((c, idx) => {
+                const varName = story.globalVariables.find(v => v.id === c.variableId)?.name || '???';
+                
+                return (
+                  <div key={c.id} className="relative flex items-center shrink-0" style={{ height: ITEM_HEIGHT }}>
+                    <div className="bg-black/20 px-2 rounded text-[10px] text-zinc-300 border border-amber-500/20 w-full truncate font-mono h-full flex items-center gap-1">
+                      <span className="text-amber-500 font-bold">{idx + 1}.</span>
+                      <span className="text-purple-400">{varName}</span>
+                      <span className="text-amber-300">{c.operator}</span>
+                      <span className="text-green-300">{c.value}</span>
+                    </div>
+                    <div 
+                      className="absolute -right-[18px] top-1/2 -translate-y-1/2 w-3 h-3 bg-amber-600 border border-zinc-900 rounded-full hover:scale-125 transition-transform cursor-crosshair z-20"
+                      onMouseDown={(e) => handleHandleMouseDown(e, node.id, c.id)}
+                    />
                   </div>
-                  <div 
-                    className="absolute -right-[18px] top-1/2 -translate-y-1/2 w-3 h-3 bg-amber-600 border border-zinc-900 rounded-full hover:scale-125 transition-transform cursor-crosshair z-20"
-                    onMouseDown={(e) => handleHandleMouseDown(e, node.id, c.id)}
-                  />
-                </div>
-              ))}
-              {(!(node as BranchNode).conditions?.length) && (
-                <div className="text-xs text-zinc-600 text-center py-1">No conditions</div>
+                );
+              })}
+              {(!branchNode.conditions?.length) && (
+                <div className="text-xs text-zinc-600 text-center flex items-center justify-center" style={{ height: ITEM_HEIGHT }}>No conditions</div>
               )}
             </div>
              
-            <div className="relative flex items-center h-6 shrink-0 mt-2">
+            <div className="relative flex items-center shrink-0 mt-[8px]" style={{ height: ITEM_HEIGHT }}>
                 <div className="bg-white/5 px-2 rounded text-[10px] text-zinc-500 border border-zinc-700/50 w-full truncate font-mono italic h-full flex items-center">
                     else
                 </div>
@@ -720,8 +894,9 @@ const Canvas: React.FC = () => {
     }
   };
 
-  const getNodeColorClass = (type: NodeType) => {
+  const getNodeColorClass = useCallback((type: NodeType) => {
     switch(type) {
+      case NodeType.START: return 'bg-emerald-800/80 text-white';
       case NodeType.LOCATION: return 'bg-emerald-900/50 text-emerald-400';
       case NodeType.BRANCH: return 'bg-amber-900/50 text-amber-400';
       case NodeType.SET_VARIABLE: return 'bg-purple-900/50 text-purple-400';
@@ -729,10 +904,11 @@ const Canvas: React.FC = () => {
       case NodeType.ACTION: return 'bg-slate-900/80 text-cyan-400';
       default: return 'bg-indigo-900/50 text-indigo-400';
     }
-  };
+  }, []);
 
-  const getNodeIcon = (type: NodeType) => {
+  const getNodeIcon = useCallback((type: NodeType) => {
     switch(type) {
+      case NodeType.START: return <Play className="w-3 h-3 fill-current" />;
       case NodeType.LOCATION: return <ImageIcon className="w-3 h-3" />;
       case NodeType.BRANCH: return <GitGraph className="w-3 h-3" />;
       case NodeType.SET_VARIABLE: return <Variable className="w-3 h-3" />;
@@ -740,7 +916,7 @@ const Canvas: React.FC = () => {
       case NodeType.ACTION: return <Clapperboard className="w-3 h-3" />;
       default: return <Type className="w-3 h-3" />;
     }
-  };
+  }, []);
 
   return (
     <div 
@@ -785,7 +961,7 @@ const Canvas: React.FC = () => {
             const isSelected = selectedIds.includes(edge.id);
             
             return (
-              <g key={edge.id} className="pointer-events-auto cursor-pointer" onClick={(e) => handleEdgeClick(e, edge.id)}>
+              <g key={edge.id} className="pointer-events-auto cursor-pointer" onMouseDown={(e) => handleEdgeClick(e, edge.id)}>
                 <path
                   d={getBezierPath(start, end, 80)}
                   stroke="transparent"
@@ -818,64 +994,24 @@ const Canvas: React.FC = () => {
         </svg>
 
         {/* Nodes Layer */}
-        {nodes.map(node => {
-          const isDialogue = node.type === NodeType.DIALOGUE;
-          const isBranch = node.type === NodeType.BRANCH;
-          const isLocation = node.type === NodeType.LOCATION;
-          
-          const hasChoices = isDialogue && (node as DialogueNode).choices && (node as DialogueNode).choices.length > 0;
-          const hasEvents = isLocation && (node as LocationNode).events && (node as LocationNode).events.length > 0;
-          
-          const showDefaultHandle = !isBranch && !hasChoices && !hasEvents;
-          
-          return (
-          <div
-            key={node.id}
-            onMouseDown={(e) => handleNodeMouseDown(e, node)}
-            onMouseUp={(e) => handleInputMouseUp(e, node.id)} 
-            className={`absolute border transition-shadow duration-150 group flex flex-col pointer-events-auto
-              ${selectedIds.includes(node.id) ? 'border-indigo-500 ring-1 ring-indigo-500 shadow-xl' : 'border-zinc-700 hover:border-zinc-500'}
-              bg-zinc-800 rounded-md overflow-hidden
-            `}
-            style={{
-              left: node.position.x,
-              top: node.position.y,
-              width: node.size.x,
-              height: node.size.y,
-              cursor: 'grab'
-            }}
-          >
-            {/* Input Handle (Left) */}
-            <div 
-                className="absolute left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 bg-zinc-600 border border-zinc-900 rounded-full hover:bg-indigo-500 z-20 cursor-crosshair transition-transform hover:scale-125" 
-                onMouseUp={(e) => handleInputMouseUp(e, node.id)}
+        {nodes.map(node => (
+            <NodeComponent 
+                key={node.id}
+                node={node}
+                selected={selectedIds.includes(node.id)}
+                onMouseDown={handleNodeMouseDown}
+                onMouseUp={handleInputMouseUp}
+                onHandleMouseDown={handleHandleMouseDown}
+                renderContent={renderNodeContent}
+                getNodeColorClass={getNodeColorClass}
+                getNodeIcon={getNodeIcon}
             />
-
-            {/* Default Output Handle (Right - Center) */}
-            {showDefaultHandle && (
-              <div 
-                className="absolute right-0 top-1/2 translate-x-1/2 -translate-y-1/2 w-4 h-4 bg-zinc-600 border border-zinc-900 rounded-full hover:bg-indigo-500 z-20 cursor-crosshair transition-transform hover:scale-125" 
-                onMouseDown={(e) => handleHandleMouseDown(e, node.id)}
-              />
-            )}
-
-            {/* Node Header */}
-            <div className={`h-[24px] px-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider shrink-0 ${getNodeColorClass(node.type)}`}>
-              {getNodeIcon(node.type)}
-              <span className="truncate flex-1">{node.name}</span>
-            </div>
-
-            {/* Node Content */}
-            <div className="p-[12px] text-zinc-300 text-xs flex-1 overflow-hidden relative flex flex-col">
-               {renderNodeContent(node)}
-            </div>
-          </div>
-        )})}
+        ))}
       </div>
 
       {/* Toolbar HUD - Grouped with Dropdown */}
       <div 
-        className="absolute top-4 left-1/2 -translate-x-1/2 bg-zinc-800 rounded-lg shadow-xl border border-zinc-700 flex items-center p-1 gap-1 z-30 select-none"
+        className="absolute top-4 left-1/2 -translate-x-1/2 bg-zinc-800 rounded-lg shadow-xl border border-zinc-700 flex items-center p-1 gap-1 z-30 select-none pointer-events-auto"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <button 
@@ -966,7 +1102,7 @@ const Canvas: React.FC = () => {
       </div>
 
       <div 
-        className="absolute bottom-4 left-4 flex flex-col gap-2 z-30"
+        className="absolute bottom-4 left-4 flex flex-col gap-2 z-30 pointer-events-auto"
         onMouseDown={(e) => e.stopPropagation()}
       >
          <div className="bg-zinc-800 rounded-md shadow-lg border border-zinc-700 flex flex-col p-1">

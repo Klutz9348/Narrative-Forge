@@ -5,12 +5,13 @@ export type Vector2 = { x: number; y: number };
 // --- Asset Layer ---
 
 export enum NodeType {
+  START = 'START', // New: Entry point
   DIALOGUE = 'DIALOGUE',
   LOCATION = 'LOCATION',
   BRANCH = 'BRANCH',
   JUMP = 'JUMP',
   SET_VARIABLE = 'SET_VARIABLE',
-  ACTION = 'ACTION', // New: Script/Action Node
+  ACTION = 'ACTION', 
 }
 
 export interface NodeData {
@@ -22,6 +23,11 @@ export interface NodeData {
   parentId?: string; // Hierarchical support
   // Visual specific: does this node have dynamic outputs?
   childrenIds?: string[]; // Deprecated in favor of edges, kept for compatibility if needed
+}
+
+export interface StartNode extends NodeData {
+  type: NodeType.START;
+  // Start node has no specific data, it just acts as a trigger
 }
 
 export interface DialogueNode extends NodeData {
@@ -67,15 +73,45 @@ export interface LocationNode extends NodeData {
   filter?: string;
 }
 
+// Logic Types
+export type LogicOperator = '==' | '!=' | '>' | '>=' | '<' | '<=' | 'contains';
+export type VariableType = 'boolean' | 'number' | 'string';
+
+export interface LogicCondition {
+  id: string;
+  variableId: string;
+  operator: LogicOperator;
+  value: string; // The target value to compare against
+}
+
+export interface GlobalVariable {
+  id: string;
+  name: string;
+  type: VariableType;
+  defaultValue: any;
+}
+
+// 新增：道具 (Item)
+export interface Item {
+  id: string;
+  name: string;
+  description: string;
+  icon?: string;
+}
+
+// 新增：线索 (Clue)
+export interface Clue {
+  id: string;
+  name: string;
+  description: string;
+  revealed: boolean;
+}
+
 // 新增：分支节点
 export interface BranchNode extends NodeData {
   type: NodeType.BRANCH;
   // 分支条件列表
-  conditions: {
-    id: string;
-    expression: string; // 例如: "coin >= 5" 或 "hasKey == true"
-    // 注意：实际的连接关系存储在 SegmentAsset.edges 中，这里的 ID 主要用于 UI 对应
-  }[];
+  conditions: LogicCondition[];
   
   // Add-ons (Optional Modules)
   defaultNextNodeId?: string; // Else path
@@ -114,6 +150,7 @@ export interface ActionNode extends NodeData {
 
 // 更新 NarrativeNode 联合类型
 export type NarrativeNode = 
+  | StartNode
   | DialogueNode 
   | LocationNode 
   | BranchNode 
@@ -143,6 +180,7 @@ export interface CharacterAsset {
   name: string;
   avatarUrl: string;
   defaultVoice?: string;
+  description?: string;
 }
 
 export interface StoryAsset {
@@ -151,12 +189,23 @@ export interface StoryAsset {
   description: string;
   segments: SegmentAsset[];
   characters: CharacterAsset[];
+  items: Item[]; // New
+  clues: Clue[]; // New
   activeSegmentId: string;
-  // 新增：全局变量定义 (为后续做准备)
-  globalVariables?: Record<string, any>; 
+  globalVariables: GlobalVariable[]; 
 }
 
-// --- Editor State ---
+// --- Editor UI Types ---
+
+export type TabType = 'canvas' | 'variable' | 'character' | 'item' | 'clue';
+
+export interface EditorTab {
+  id: string;
+  type: TabType;
+  label: string;
+  dataId?: string; // For character/item ID
+  icon?: any;
+}
 
 export interface EditorState {
   story: StoryAsset;

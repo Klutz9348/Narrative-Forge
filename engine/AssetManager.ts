@@ -7,22 +7,32 @@ export class AssetManager {
   }
 
   static createStory(): StoryAsset {
+    const firstSegment = AssetManager.createSegment('Chapter 1');
+    
     return {
       id: AssetManager.generateId('story'),
       title: 'New Story',
       description: '',
-      activeSegmentId: '',
+      activeSegmentId: firstSegment.id,
       characters: [],
-      segments: []
+      segments: [firstSegment],
+      globalVariables: [],
+      items: [],
+      clues: []
     };
   }
 
   static createSegment(name: string = 'New Segment'): SegmentAsset {
+    const segmentId = AssetManager.generateId('seg');
+    const startNode = AssetManager.createNode(NodeType.START, { x: 100, y: 300 });
+    
     return {
-      id: AssetManager.generateId('seg'),
+      id: segmentId,
       name,
-      rootNodeId: '',
-      nodes: {},
+      rootNodeId: startNode.id,
+      nodes: {
+        [startNode.id]: startNode
+      },
       edges: []
     };
   }
@@ -39,6 +49,8 @@ export class AssetManager {
     };
 
     switch (type) {
+      case NodeType.START:
+        return { ...base, name: 'Start', size: { x: 120, y: 60 } } as any;
       case NodeType.DIALOGUE:
         return { ...base, name: 'Dialogue', characterId: '', text: '...', choices: [] } as any;
       case NodeType.LOCATION:

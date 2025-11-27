@@ -1,11 +1,12 @@
 
 import React, { useState } from 'react';
-import { MousePointer2, MoreVertical, Wand2, Plus, Trash2, ArrowRightCircle, Mic, Music, LayoutTemplate, Settings2, Code, Split, Zap, PlayCircle, StopCircle, Target, Clapperboard, Timer, Smartphone, MessageSquare, ImageIcon } from 'lucide-react';
-import { NodeType, DialogueNode, BranchNode, VariableSetterNode, JumpNode, LocationNode, NodeEvent, Hotspot, ActionNode, ActionCommandType } from '../types';
+import { MousePointer2, MoreVertical, Wand2, Plus, Trash2, ArrowRightCircle, Mic, Music, LayoutTemplate, Settings2, Code, Split, Zap, PlayCircle, StopCircle, Target, Clapperboard, Timer, Smartphone, MessageSquare, ImageIcon, Play } from 'lucide-react';
+import { NodeType, DialogueNode, BranchNode, VariableSetterNode, JumpNode, LocationNode, NodeEvent, Hotspot, ActionNode, ActionCommandType, LogicOperator, VariableType } from '../types';
 import * as GeminiService from '../services/geminiService';
 import { useEditorStore } from '../store/useEditorStore';
 
 const NODE_TYPE_LABELS: Record<NodeType, string> = {
+  [NodeType.START]: '开始 (Start)',
   [NodeType.DIALOGUE]: '对话 (Dialogue)',
   [NodeType.LOCATION]: '场景 (Location)',
   [NodeType.BRANCH]: '逻辑分支 (Branch)',
@@ -16,6 +17,7 @@ const NODE_TYPE_LABELS: Record<NodeType, string> = {
 
 // Definition of available add-ons per node type
 const ADDON_DEFINITIONS: Record<NodeType, { key: string; label: string; icon: React.ReactNode; defaultValue: any }[]> = {
+  [NodeType.START]: [],
   [NodeType.DIALOGUE]: [
     { key: 'voiceId', label: '语音 (Voiceover)', icon: <Mic className="w-3 h-3"/>, defaultValue: '' },
     { key: 'expression', label: '表情 (Expression)', icon: <Settings2 className="w-3 h-3"/>, defaultValue: 'neutral' },
@@ -60,6 +62,12 @@ const ACTION_COMMANDS: Record<ActionCommandType, { label: string; icon: React.Re
     icon: <MessageSquare className="w-3 h-3" />,
     params: [{ key: 'message', label: 'Message', type: 'text' }] 
   }
+};
+
+const OPERATORS_BY_TYPE: Record<VariableType, LogicOperator[]> = {
+  'boolean': ['==', '!='],
+  'number': ['==', '!=', '>', '>=', '<', '<='],
+  'string': ['==', '!=', 'contains']
 };
 
 const Inspector: React.FC = () => {
@@ -195,10 +203,11 @@ const Inspector: React.FC = () => {
         <input 
           type="text" 
           value={selectedNode.name}
+          disabled={selectedNode.type === NodeType.START} // Start node name is fixed
           onFocus={() => startEditing(selectedNode.id)}
           onChange={(e) => updateNode(selectedNode.id, { name: e.target.value })}
           onBlur={commitEditing}
-          className="bg-transparent text-lg font-bold text-white w-full focus:outline-none focus:ring-1 focus:ring-indigo-500 rounded px-1 -ml-1"
+          className="bg-transparent text-lg font-bold text-white w-full focus:outline-none focus:ring-1 focus:ring-indigo-500 rounded px-1 -ml-1 disabled:opacity-50"
         />
         
         {/* Transform Info */}
@@ -231,6 +240,18 @@ const Inspector: React.FC = () => {
       <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-6">
         
         {/* 2. CORE PAYLOAD (Minimal Set) */}
+
+        {selectedNode.type === NodeType.START && (
+          <div className="p-4 bg-emerald-900/20 border border-emerald-500/30 rounded flex flex-col items-center text-center gap-2">
+            <Play className="w-8 h-8 text-emerald-500" />
+            <div>
+              <h3 className="text-sm font-bold text-emerald-400">章节起点</h3>
+              <p className="text-xs text-emerald-200/70 mt-1">
+                这是本章节的固定入口。所有剧情都必须从这里开始。此节点不可删除。
+              </p>
+            </div>
+          </div>
+        )}
         
         {selectedNode.type === NodeType.DIALOGUE && (
           <div className="space-y-4">
@@ -509,48 +530,124 @@ const Inspector: React.FC = () => {
 
         {selectedNode.type === NodeType.BRANCH && (
            <div className="space-y-4">
-              <label className="text-[10px] text-zinc-500 uppercase font-semibold block mb-1.5">条件列表 (Conditions)</label>
-              <div className="space-y-2">
-                {(selectedNode as BranchNode).conditions?.map((condition, idx) => (
-                  <div key={condition.id} className="flex gap-2 items-center group">
-                    <div className="text-[10px] text-zinc-500 w-4 font-mono text-center">{idx + 1}</div>
-                    <input
-                      type="text"
-                      value={condition.expression}
-                      onFocus={() => startEditing(selectedNode.id)}
-                      onChange={(e) => {
-                         const node = selectedNode as BranchNode;
-                         const newConditions = node.conditions.map(c => c.id === condition.id ? { ...c, expression: e.target.value } : c);
-                         updateNode(node.id, { conditions: newConditions });
-                      }}
-                      onBlur={commitEditing}
-                      className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-300 font-mono"
-                    />
-                    <button 
-                      onClick={() => {
-                        const node = selectedNode as BranchNode;
-                        startEditing(node.id);
-                        updateNode(node.id, { conditions: node.conditions.filter(c => c.id !== condition.id) });
-                        commitEditing();
-                      }}
-                      className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400 transition-opacity"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))}
+              <label className="text-[10px] text-zinc-500 uppercase font-semibold block mb-1.5">条件列表 (Visual Logic)</label>
+              
+              <div className="space-y-3">
+                {(selectedNode as BranchNode).conditions?.map((condition, idx) => {
+                  // Find variable definition
+                  const variable = story.globalVariables.find(v => v.id === condition.variableId);
+                  const varType = variable?.type || 'string';
+                  const availableOps = OPERATORS_BY_TYPE[varType];
+
+                  return (
+                    <div key={condition.id} className="bg-zinc-800 border border-zinc-700 rounded p-2 relative group">
+                        <div className="flex items-center gap-2 mb-2">
+                             <div className="text-[10px] text-zinc-500 font-mono w-4 text-center">{idx + 1}</div>
+                             <div className="text-xs font-bold text-zinc-400">If</div>
+                             <button 
+                                onClick={() => {
+                                  const node = selectedNode as BranchNode;
+                                  startEditing(node.id);
+                                  updateNode(node.id, { conditions: node.conditions.filter(c => c.id !== condition.id) });
+                                  commitEditing();
+                                }}
+                                className="absolute top-2 right-2 text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                        </div>
+                        
+                        {/* 3-Part Logic Builder */}
+                        <div className="grid gap-2">
+                           {/* 1. Variable Selector */}
+                           <select 
+                              className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-300 focus:outline-none"
+                              value={condition.variableId}
+                              onChange={(e) => {
+                                const node = selectedNode as BranchNode;
+                                startEditing(node.id);
+                                const newConditions = node.conditions.map(c => c.id === condition.id ? { ...c, variableId: e.target.value } : c);
+                                updateNode(node.id, { conditions: newConditions });
+                              }}
+                              onBlur={commitEditing}
+                           >
+                             <option value="" disabled>-- 变量 --</option>
+                             {story.globalVariables.map(v => (
+                               <option key={v.id} value={v.id}>{v.name}</option>
+                             ))}
+                           </select>
+
+                           <div className="flex gap-2">
+                             {/* 2. Operator Selector */}
+                             <select 
+                                className="w-20 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs text-amber-300 font-mono focus:outline-none"
+                                value={condition.operator}
+                                onChange={(e) => {
+                                  const node = selectedNode as BranchNode;
+                                  startEditing(node.id);
+                                  const newConditions = node.conditions.map(c => c.id === condition.id ? { ...c, operator: e.target.value as any } : c);
+                                  updateNode(node.id, { conditions: newConditions });
+                                }}
+                                onBlur={commitEditing}
+                             >
+                               {availableOps.map(op => <option key={op} value={op}>{op}</option>)}
+                             </select>
+
+                             {/* 3. Value Input */}
+                             {varType === 'boolean' ? (
+                                <select
+                                  className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs text-green-300 font-mono focus:outline-none"
+                                  value={condition.value}
+                                  onChange={(e) => {
+                                     const node = selectedNode as BranchNode;
+                                     startEditing(node.id);
+                                     const newConditions = node.conditions.map(c => c.id === condition.id ? { ...c, value: e.target.value } : c);
+                                     updateNode(node.id, { conditions: newConditions });
+                                  }}
+                                  onBlur={commitEditing}
+                                >
+                                  <option value="true">True</option>
+                                  <option value="false">False</option>
+                                </select>
+                             ) : (
+                                <input 
+                                  className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs text-green-300 font-mono focus:outline-none"
+                                  placeholder="Value..."
+                                  value={condition.value}
+                                  onChange={(e) => {
+                                     const node = selectedNode as BranchNode;
+                                     startEditing(node.id);
+                                     const newConditions = node.conditions.map(c => c.id === condition.id ? { ...c, value: e.target.value } : c);
+                                     updateNode(node.id, { conditions: newConditions });
+                                  }}
+                                  onBlur={commitEditing}
+                                />
+                             )}
+                           </div>
+                        </div>
+                    </div>
+                  );
+                })}
                 
-                <button 
-                  onClick={() => {
-                    const node = selectedNode as BranchNode;
-                    startEditing(node.id);
-                    updateNode(node.id, { conditions: [...(node.conditions || []), { id: `c_${Date.now()}`, expression: 'true' }] });
-                    commitEditing();
-                  }}
-                  className="w-full py-1.5 border border-dashed border-zinc-700 hover:border-zinc-500 rounded text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors flex items-center justify-center gap-1"
-                >
-                  <Plus className="w-3 h-3" /> 添加条件
-                </button>
+                {story.globalVariables.length === 0 ? (
+                  <div className="text-center text-[10px] text-zinc-500 py-4 border border-dashed border-zinc-800 rounded bg-zinc-900/50">
+                     请先在左侧边栏添加全局变量
+                  </div>
+                ) : (
+                  <button 
+                    onClick={() => {
+                      const node = selectedNode as BranchNode;
+                      startEditing(node.id);
+                      // Default to first variable
+                      const firstVar = story.globalVariables[0];
+                      updateNode(node.id, { conditions: [...(node.conditions || []), { id: `c_${Date.now()}`, variableId: firstVar?.id || '', operator: '==', value: '0' }] });
+                      commitEditing();
+                    }}
+                    className="w-full py-1.5 border border-dashed border-zinc-700 hover:border-zinc-500 rounded text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors flex items-center justify-center gap-1"
+                  >
+                    <Plus className="w-3 h-3" /> 添加条件
+                  </button>
+                )}
               </div>
            </div>
         )}
@@ -702,11 +799,9 @@ const Inspector: React.FC = () => {
                  })}
                  
                  {(!((selectedNode as ActionNode).commands?.length)) && (
-                    <div className="text-center text-[10px] text-zinc-600 italic py-4 border border-dashed border-zinc-800 rounded">
-                       点击上方按钮添加指令
-                    </div>
-                 )}
-              </div>
+                    <div className="text-center text-zinc-600 italic text-[10px] mt-4">Empty Sequence</div>
+                )}
+             </div>
            </div>
         )}
 
