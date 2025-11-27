@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
-import { MousePointer2, MoreVertical, Wand2, Plus, Trash2, ArrowRightCircle, Mic, Music, LayoutTemplate, Settings2, Code, Split } from 'lucide-react';
-import { NodeType, DialogueNode, BranchNode, VariableSetterNode, JumpNode, LocationNode } from '../types';
+import { MousePointer2, MoreVertical, Wand2, Plus, Trash2, ArrowRightCircle, Mic, Music, LayoutTemplate, Settings2, Code, Split, Zap, PlayCircle, StopCircle, Target, Clapperboard, Timer, Smartphone, MessageSquare, ImageIcon } from 'lucide-react';
+import { NodeType, DialogueNode, BranchNode, VariableSetterNode, JumpNode, LocationNode, NodeEvent, Hotspot, ActionNode, ActionCommandType } from '../types';
 import * as GeminiService from '../services/geminiService';
 import { useEditorStore } from '../store/useEditorStore';
 
@@ -11,6 +11,7 @@ const NODE_TYPE_LABELS: Record<NodeType, string> = {
   [NodeType.BRANCH]: '逻辑分支 (Branch)',
   [NodeType.JUMP]: '章节跳转 (Jump)',
   [NodeType.SET_VARIABLE]: '设置变量 (Set Var)',
+  [NodeType.ACTION]: '动作序列 (Action Script)',
 };
 
 // Definition of available add-ons per node type
@@ -22,7 +23,6 @@ const ADDON_DEFINITIONS: Record<NodeType, { key: string; label: string; icon: Re
   ],
   [NodeType.LOCATION]: [
     { key: 'bgm', label: '背景音乐 (BGM)', icon: <Music className="w-3 h-3"/>, defaultValue: '' },
-    { key: 'hotspots', label: '热区交互 (Hotspots)', icon: <MousePointer2 className="w-3 h-3"/>, defaultValue: [] },
     { key: 'filter', label: '视觉滤镜 (Filter)', icon: <Settings2 className="w-3 h-3"/>, defaultValue: 'none' }
   ],
   [NodeType.BRANCH]: [
@@ -31,7 +31,35 @@ const ADDON_DEFINITIONS: Record<NodeType, { key: string; label: string; icon: Re
   [NodeType.SET_VARIABLE]: [
     { key: 'isAdvanced', label: '高级模式 (Advanced)', icon: <Code className="w-3 h-3"/>, defaultValue: true }
   ],
-  [NodeType.JUMP]: []
+  [NodeType.JUMP]: [],
+  [NodeType.ACTION]: []
+};
+
+// Command Definitions for Action Node
+const ACTION_COMMANDS: Record<ActionCommandType, { label: string; icon: React.ReactNode; params: { key: string; label: string; type: 'text' | 'number' }[] }> = {
+  playSound: { 
+    label: '播放音效', 
+    icon: <Zap className="w-3 h-3" />,
+    params: [{ key: 'audioId', label: 'Audio ID / URL', type: 'text' }] 
+  },
+  wait: { 
+    label: '等待 (Wait)', 
+    icon: <Timer className="w-3 h-3" />,
+    params: [{ key: 'duration', label: 'Duration (sec)', type: 'number' }] 
+  },
+  screenShake: { 
+    label: '屏幕震动', 
+    icon: <Smartphone className="w-3 h-3" />,
+    params: [
+      { key: 'intensity', label: 'Intensity (1-10)', type: 'number' },
+      { key: 'duration', label: 'Duration (sec)', type: 'number' }
+    ] 
+  },
+  showToast: { 
+    label: '显示提示', 
+    icon: <MessageSquare className="w-3 h-3" />,
+    params: [{ key: 'message', label: 'Message', type: 'text' }] 
+  }
 };
 
 const Inspector: React.FC = () => {
@@ -43,6 +71,7 @@ const Inspector: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [aiVariations, setAiVariations] = useState<string[]>([]);
   const [showAddonMenu, setShowAddonMenu] = useState(false);
+  const [showEventMenu, setShowEventMenu] = useState(false);
 
   const handleAiGenerate = async () => {
     if (!selectedNode || selectedNode.type !== NodeType.DIALOGUE) return;
@@ -71,6 +100,74 @@ const Inspector: React.FC = () => {
     if (!selectedNode) return;
     startEditing(selectedNode.id);
     updateNode(selectedNode.id, { [key]: undefined });
+    commitEditing();
+  };
+
+  // Location Node Specific Helpers
+  const addHotspot = () => {
+    if (!selectedNode || selectedNode.type !== NodeType.LOCATION) return;
+    const locNode = selectedNode as LocationNode;
+    const newHotspot: Hotspot = {
+      id: `hs_${Date.now()}`,
+      name: `Hotspot ${((locNode.hotspots?.length || 0) + 1)}`,
+      rect: { x: 20, y: 20, w: 20, h: 20 } // Default 20% box
+    };
+    startEditing(locNode.id);
+    updateNode(locNode.id, { hotspots: [...(locNode.hotspots || []), newHotspot] });
+    commitEditing();
+  };
+
+  const removeHotspot = (hsId: string) => {
+    if (!selectedNode || selectedNode.type !== NodeType.LOCATION) return;
+    const locNode = selectedNode as LocationNode;
+    startEditing(locNode.id);
+    // Remove hotspot AND any events linked to it
+    const newEvents = (locNode.events || []).filter(e => e.targetId !== hsId);
+    const newHotspots = (locNode.hotspots || []).filter(h => h.id !== hsId);
+    updateNode(locNode.id, { hotspots: newHotspots, events: newEvents });
+    commitEditing();
+  };
+
+  const addEvent = (trigger: 'onEnter' | 'onExit' | 'onClick', targetId?: string) => {
+    if (!selectedNode || selectedNode.type !== NodeType.LOCATION) return;
+    const locNode = selectedNode as LocationNode;
+    
+    let label: string = trigger;
+    if (trigger === 'onClick' && targetId) {
+      const hs = locNode.hotspots?.find(h => h.id === targetId);
+      label = `Click: ${hs?.name || 'Unknown'}`;
+    } else if (trigger === 'onEnter') {
+      label = '进入时 (On Enter)';
+    } else if (trigger === 'onExit') {
+      label = '离开时 (On Exit)';
+    }
+
+    const newEvent: NodeEvent = {
+      id: `evt_${Date.now()}`,
+      type: trigger === 'onClick' ? 'interaction' : 'lifecycle',
+      trigger,
+      targetId,
+      label
+    };
+
+    startEditing(locNode.id);
+    updateNode(locNode.id, { events: [...(locNode.events || []), newEvent] });
+    commitEditing();
+    setShowEventMenu(false); // Close menu after adding
+  };
+
+  const addActionCommand = (type: ActionCommandType) => {
+    if (!selectedNode || selectedNode.type !== NodeType.ACTION) return;
+    const actionNode = selectedNode as ActionNode;
+    
+    const newCommand = {
+      id: `cmd_${Date.now()}`,
+      type,
+      params: {}
+    };
+    
+    startEditing(actionNode.id);
+    updateNode(actionNode.id, { commands: [...(actionNode.commands || []), newCommand] });
     commitEditing();
   };
 
@@ -279,6 +376,134 @@ const Inspector: React.FC = () => {
                 )}
               </div>
             </div>
+
+            {/* Hotspot Manager */}
+            <div>
+              <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-[10px] text-zinc-500 uppercase font-semibold">热区 (Hotspots)</label>
+                  <button onClick={addHotspot} className="text-zinc-500 hover:text-white"><Plus className="w-3 h-3" /></button>
+              </div>
+              <div className="space-y-2">
+                {(selectedNode as LocationNode).hotspots?.map(hs => (
+                  <div key={hs.id} className="bg-zinc-800/50 p-2 rounded border border-zinc-700 group">
+                    <div className="flex justify-between items-center mb-1">
+                      <input 
+                        value={hs.name}
+                        onChange={(e) => {
+                          const node = selectedNode as LocationNode;
+                          startEditing(node.id);
+                          const newHotspots = node.hotspots.map(h => h.id === hs.id ? { ...h, name: e.target.value } : h);
+                          updateNode(node.id, { hotspots: newHotspots });
+                        }}
+                        onBlur={commitEditing}
+                        className="bg-transparent text-xs text-zinc-300 focus:outline-none w-24"
+                      />
+                      <button onClick={() => removeHotspot(hs.id)} className="text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100"><Trash2 className="w-3 h-3" /></button>
+                    </div>
+                    {/* Position & Size */}
+                    <div className="grid grid-cols-4 gap-1 mb-2">
+                      {(['x', 'y', 'w', 'h'] as const).map(prop => (
+                         <div key={prop} className="flex items-center gap-1">
+                           <span className="text-[8px] text-zinc-600 uppercase">{prop}</span>
+                           <input 
+                             type="number"
+                             value={hs.rect[prop]}
+                             onChange={(e) => {
+                                const node = selectedNode as LocationNode;
+                                startEditing(node.id);
+                                const newHotspots = node.hotspots.map(h => h.id === hs.id ? { ...h, rect: { ...h.rect, [prop]: parseInt(e.target.value) || 0 } } : h);
+                                updateNode(node.id, { hotspots: newHotspots });
+                             }}
+                             onBlur={commitEditing}
+                             className="w-full bg-zinc-900 border border-zinc-700 rounded px-1 text-[10px] text-zinc-400"
+                           />
+                         </div>
+                      ))}
+                    </div>
+                    {/* Hotspot Image URL */}
+                     <div className="flex items-center gap-2">
+                       <ImageIcon className="w-3 h-3 text-zinc-600 shrink-0" />
+                       <input 
+                         type="text"
+                         value={hs.image || ''}
+                         placeholder="Image URL (Optional)"
+                         onChange={(e) => {
+                            const node = selectedNode as LocationNode;
+                            startEditing(node.id);
+                            const newHotspots = node.hotspots.map(h => h.id === hs.id ? { ...h, image: e.target.value } : h);
+                            updateNode(node.id, { hotspots: newHotspots });
+                         }}
+                         onBlur={commitEditing}
+                         className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-[10px] text-zinc-400"
+                       />
+                     </div>
+                  </div>
+                ))}
+                {!((selectedNode as LocationNode).hotspots?.length) && (
+                  <div className="text-[10px] text-zinc-600 italic text-center p-2 border border-dashed border-zinc-800 rounded">No Hotspots Defined</div>
+                )}
+              </div>
+            </div>
+
+            {/* Event Manager */}
+            <div>
+               <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-[10px] text-zinc-500 uppercase font-semibold">事件与动态端口 (Events)</label>
+                  <div className="relative">
+                    <button 
+                      onClick={() => setShowEventMenu(!showEventMenu)}
+                      className={`text-zinc-500 hover:text-white transition-colors ${showEventMenu ? 'text-white' : ''}`}
+                    >
+                      <Plus className="w-3 h-3" />
+                    </button>
+                    
+                    {showEventMenu && (
+                      <>
+                        <div className="fixed inset-0 z-40" onClick={() => setShowEventMenu(false)}></div>
+                        <div className="absolute right-0 top-full mt-1 w-32 bg-zinc-800 border border-zinc-700 rounded shadow-xl py-1 z-50 animate-in fade-in zoom-in-95 duration-100">
+                          <button onClick={() => addEvent('onEnter')} className="w-full text-left px-2 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700 flex items-center gap-2 transition-colors"><PlayCircle className="w-3 h-3 text-green-400" /> On Enter</button>
+                          <button onClick={() => addEvent('onExit')} className="w-full text-left px-2 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700 flex items-center gap-2 transition-colors"><StopCircle className="w-3 h-3 text-red-400" /> On Exit</button>
+                          <div className="border-t border-zinc-700 my-1"></div>
+                          {(selectedNode as LocationNode).hotspots?.map(hs => (
+                            <button key={hs.id} onClick={() => addEvent('onClick', hs.id)} className="w-full text-left px-2 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700 flex items-center gap-2 transition-colors"><Target className="w-3 h-3 text-amber-400" /> Click: {hs.name}</button>
+                          ))}
+                          {(!((selectedNode as LocationNode).hotspots?.length)) && (
+                             <div className="px-2 py-1 text-[10px] text-zinc-500 italic text-center">No Hotspots</div>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+               </div>
+               
+               <div className="space-y-1.5">
+                  {(selectedNode as LocationNode).events?.map(evt => (
+                    <div key={evt.id} className="flex items-center justify-between p-1.5 bg-zinc-800 rounded border border-zinc-700 text-xs">
+                       <div className="flex items-center gap-2">
+                          <Zap className={`w-3 h-3 ${evt.trigger === 'onClick' ? 'text-amber-400' : 'text-indigo-400'}`} />
+                          <span className="text-zinc-300">{evt.label}</span>
+                       </div>
+                       <button 
+                         onClick={() => {
+                            const node = selectedNode as LocationNode;
+                            startEditing(node.id);
+                            updateNode(node.id, { events: node.events.filter(e => e.id !== evt.id) });
+                            commitEditing();
+                         }}
+                         className="text-zinc-600 hover:text-red-400"
+                       >
+                         <Trash2 className="w-3 h-3" />
+                       </button>
+                    </div>
+                  ))}
+                  {!((selectedNode as LocationNode).events?.length) && (
+                     <div className="text-[10px] text-zinc-600 italic text-center p-2 border border-dashed border-zinc-800 rounded">
+                       默认：单输出端口
+                     </div>
+                  )}
+               </div>
+            </div>
+
           </div>
         )}
 
@@ -406,6 +631,84 @@ const Inspector: React.FC = () => {
             </div>
            </div>
         )}
+        
+        {/* Action Node Editor */}
+        {selectedNode.type === NodeType.ACTION && (
+           <div className="space-y-4">
+              <label className="text-[10px] text-zinc-500 uppercase font-semibold block mb-1.5">指令序列 (Command Sequence)</label>
+              
+              <div className="flex gap-2 flex-wrap mb-4">
+                 {(Object.keys(ACTION_COMMANDS) as ActionCommandType[]).map(type => (
+                    <button 
+                      key={type}
+                      onClick={() => addActionCommand(type)}
+                      className="flex items-center gap-1 px-2 py-1 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded text-[10px] text-zinc-300 transition-colors"
+                    >
+                      {ACTION_COMMANDS[type].icon}
+                      {ACTION_COMMANDS[type].label}
+                    </button>
+                 ))}
+              </div>
+
+              <div className="space-y-3">
+                 {(selectedNode as ActionNode).commands?.map((cmd, idx) => {
+                    const def = ACTION_COMMANDS[cmd.type];
+                    return (
+                      <div key={cmd.id} className="bg-zinc-800/50 border border-zinc-700 rounded p-2 relative group">
+                         <div className="flex items-center gap-2 mb-2 pb-2 border-b border-zinc-700/50">
+                            <span className="text-[10px] font-mono text-zinc-500 w-4">{idx + 1}</span>
+                            <div className="text-zinc-400">{def.icon}</div>
+                            <span className="text-xs font-bold text-zinc-200">{def.label}</span>
+                            
+                            <button 
+                              onClick={() => {
+                                const node = selectedNode as ActionNode;
+                                startEditing(node.id);
+                                updateNode(node.id, { commands: node.commands.filter(c => c.id !== cmd.id) });
+                                commitEditing();
+                              }}
+                              className="absolute top-2 right-2 text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                         </div>
+                         
+                         <div className="grid gap-2">
+                           {def.params.map(param => (
+                             <div key={param.key} className="flex items-center gap-2">
+                               <label className="text-[10px] text-zinc-500 w-20 truncate">{param.label}</label>
+                               <input 
+                                 type={param.type}
+                                 value={cmd.params[param.key] || ''}
+                                 onChange={(e) => {
+                                    const node = selectedNode as ActionNode;
+                                    startEditing(node.id);
+                                    const newCommands = [...node.commands];
+                                    const val = param.type === 'number' ? parseFloat(e.target.value) : e.target.value;
+                                    newCommands[idx] = { 
+                                      ...cmd, 
+                                      params: { ...cmd.params, [param.key]: val } 
+                                    };
+                                    updateNode(node.id, { commands: newCommands });
+                                 }}
+                                 onBlur={commitEditing}
+                                 className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-1.5 py-0.5 text-xs text-zinc-300"
+                               />
+                             </div>
+                           ))}
+                         </div>
+                      </div>
+                    );
+                 })}
+                 
+                 {(!((selectedNode as ActionNode).commands?.length)) && (
+                    <div className="text-center text-[10px] text-zinc-600 italic py-4 border border-dashed border-zinc-800 rounded">
+                       点击上方按钮添加指令
+                    </div>
+                 )}
+              </div>
+           </div>
+        )}
 
 
         {/* 3. MODULES / ADD-ONS (Optional) */}
@@ -504,20 +807,6 @@ const Inspector: React.FC = () => {
                 className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-300"
              />
           </div>
-        )}
-
-        {/* Module: Hotspots */}
-        {(selectedNode as LocationNode).hotspots !== undefined && (
-           <div className="border border-zinc-700 rounded bg-zinc-800/30 p-3 relative group">
-              <button onClick={() => removeAddon('hotspots')} className="absolute top-2 right-2 text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 className="w-3 h-3" /></button>
-              <div className="flex items-center gap-2 mb-2 text-amber-400">
-                <MousePointer2 className="w-3 h-3" />
-                <span className="text-xs font-bold uppercase">热区交互</span>
-              </div>
-              <div className="text-xs text-zinc-500 italic text-center py-2 border border-dashed border-zinc-700 rounded">
-                 在画布上绘制热区 (TBD)
-              </div>
-           </div>
         )}
 
         {/* Module: Filter */}

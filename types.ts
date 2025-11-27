@@ -10,6 +10,7 @@ export enum NodeType {
   BRANCH = 'BRANCH',
   JUMP = 'JUMP',
   SET_VARIABLE = 'SET_VARIABLE',
+  ACTION = 'ACTION', // New: Script/Action Node
 }
 
 export interface NodeData {
@@ -35,12 +36,33 @@ export interface DialogueNode extends NodeData {
   placement?: 'left' | 'center' | 'right';
 }
 
+// Event System Types
+export type NodeEventType = 'lifecycle' | 'interaction';
+export type NodeEventTrigger = 'onEnter' | 'onExit' | 'onClick';
+
+export interface NodeEvent {
+  id: string;
+  type: NodeEventType;
+  trigger: NodeEventTrigger;
+  label: string;
+  targetId?: string; // e.g., hotspotId for 'onClick' events
+}
+
+export interface Hotspot {
+  id: string;
+  name: string;
+  rect: { x: number; y: number; w: number; h: number }; // percentage 0-100 relative to node size or image container
+  image?: string; // Optional overlay image for the hotspot
+}
+
 export interface LocationNode extends NodeData {
   type: NodeType.LOCATION;
   backgroundImage: string;
   
   // Add-ons (Optional Modules)
-  hotspots?: { id: string; rect: { x: number; y: number; w: number; h: number }; action: string }[];
+  hotspots: Hotspot[]; // Define the geometric areas
+  events: NodeEvent[]; // Define logic ports (OnEnter, OnClick Hotspot A, etc.)
+  
   bgm?: string;
   filter?: string;
 }
@@ -76,6 +98,20 @@ export interface JumpNode extends NodeData {
   targetSegmentId: string; // 跳转到的目标章节 ID
 }
 
+// 新增：动作/脚本节点
+export type ActionCommandType = 'playSound' | 'wait' | 'screenShake' | 'showToast';
+
+export interface ActionCommand {
+  id: string;
+  type: ActionCommandType;
+  params: Record<string, any>;
+}
+
+export interface ActionNode extends NodeData {
+  type: NodeType.ACTION;
+  commands: ActionCommand[];
+}
+
 // 更新 NarrativeNode 联合类型
 export type NarrativeNode = 
   | DialogueNode 
@@ -83,13 +119,14 @@ export type NarrativeNode =
   | BranchNode 
   | VariableSetterNode 
   | JumpNode 
+  | ActionNode
   | NodeData;
 
 export interface Edge {
   id: string;
   sourceNodeId: string;
   targetNodeId: string;
-  sourceHandleId?: string; // For nodes with multiple outputs (e.g. choices, branches)
+  sourceHandleId?: string; // For nodes with multiple outputs (e.g. choices, branches, events)
   condition?: string; // Expression string, e.g. "sanity > 50"
 }
 

@@ -49,6 +49,8 @@ export class AssetManager {
         return { ...base, name: 'Set Variable', variableName: 'new_var', operator: 'SET', value: '0', size: { x: 250, y: 150 } } as any;
       case NodeType.JUMP:
         return { ...base, name: 'Jump to...', targetSegmentId: '', size: { x: 250, y: 120 } } as any;
+      case NodeType.ACTION:
+        return { ...base, name: 'Action Sequence', commands: [], size: { x: 250, y: 200 } } as any;
       default:
         return base as NarrativeNode;
     }

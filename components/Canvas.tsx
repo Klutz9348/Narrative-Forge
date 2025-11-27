@@ -1,7 +1,6 @@
-
 import React, { useState, useRef, useEffect } from 'react';
-import { MousePointer2, Type, Image as ImageIcon, ZoomIn, ZoomOut, GitGraph, Variable, ArrowRightCircle, ChevronDown, Layers } from 'lucide-react';
-import { NodeType, NarrativeNode, Vector2, DialogueNode, BranchNode, VariableSetterNode, JumpNode } from '../types';
+import { MousePointer2, Type, Image as ImageIcon, ZoomIn, ZoomOut, GitGraph, Variable, ArrowRightCircle, ChevronDown, Layers, Zap, Clapperboard, Timer, Smartphone, MessageSquare } from 'lucide-react';
+import { NodeType, NarrativeNode, Vector2, DialogueNode, BranchNode, VariableSetterNode, JumpNode, LocationNode, ActionNode, Hotspot } from '../types';
 import { useEditorStore } from '../store/useEditorStore';
 
 // Bezier Curve Helper
@@ -36,6 +35,27 @@ const Canvas: React.FC = () => {
   // Local State
   const [isPanning, setIsPanning] = useState(false);
   const [dragState, setDragState] = useState<{ nodeId: string, startX: number, startY: number, initialPos: Vector2 } | null>(null);
+  
+  // Hotspot Drag & Resize State
+  const [hotspotDragState, setHotspotDragState] = useState<{
+    nodeId: string;
+    hotspotId: string;
+    startX: number;
+    startY: number;
+    initialRect: { x: number; y: number; w: number; h: number };
+    nodeSize: { x: number; y: number };
+  } | null>(null);
+
+  const [hotspotResizeState, setHotspotResizeState] = useState<{
+    nodeId: string;
+    hotspotId: string;
+    handle: 'nw' | 'ne' | 'sw' | 'se';
+    startX: number;
+    startY: number;
+    initialRect: { x: number; y: number; w: number; h: number };
+    nodeSize: { x: number; y: number };
+  } | null>(null);
+
   const [linkingState, setLinkingState] = useState<{
     sourceNodeId: string;
     sourceHandleId?: string;
@@ -54,18 +74,27 @@ const Canvas: React.FC = () => {
   const stateRef = useRef({
     canvasTransform,
     dragState,
+    hotspotDragState,
+    hotspotResizeState,
     linkingState,
     isPanning,
-    panStart
+    panStart,
+    story
   });
 
   // Keep Ref in sync with React state for reads that happen later (passive updates)
   useEffect(() => {
-    stateRef.current = { ...stateRef.current, canvasTransform, isPanning, panStart };
-    // Note: We don't sync dragState/linkingState here to avoid overwriting the 
-    // immediate manual updates we do in handlers with stale React state.
-    // Instead, handlers update both State and Ref simultaneously.
-  }, [canvasTransform, isPanning, panStart]);
+    stateRef.current = { 
+      canvasTransform, 
+      dragState, 
+      hotspotDragState, 
+      hotspotResizeState,
+      linkingState, 
+      isPanning, 
+      panStart,
+      story 
+    };
+  }, [canvasTransform, dragState, hotspotDragState, hotspotResizeState, linkingState, isPanning, panStart, story]);
 
   // --- Keyboard Shortcuts ---
   useEffect(() => {
@@ -86,8 +115,7 @@ const Canvas: React.FC = () => {
       const current = stateRef.current;
       
       // Safety Check: If buttons are 0 (mouse released), force cleanup.
-      // This fixes the "sticky" issue if the mouseup event was missed.
-      if (e.buttons === 0 && (current.dragState || current.isPanning)) {
+      if (e.buttons === 0 && (current.dragState || current.isPanning || current.hotspotDragState || current.hotspotResizeState)) {
          handleWindowMouseUp(e);
          return;
       }
@@ -101,7 +129,6 @@ const Canvas: React.FC = () => {
           y: current.canvasTransform.y + dy 
         });
         setPanStart({ x: e.clientX, y: e.clientY });
-        // Update ref for next frame consistency
         stateRef.current.panStart = { x: e.clientX, y: e.clientY };
       } 
       else if (current.dragState) {
@@ -114,9 +141,84 @@ const Canvas: React.FC = () => {
             y: Math.round(current.dragState.initialPos.y + dy)
           }
         });
-      } 
+      }
+      else if (current.hotspotDragState) {
+        // Hotspot Move Logic
+        const dx = (e.clientX - current.hotspotDragState.startX) / current.canvasTransform.scale;
+        const dy = (e.clientY - current.hotspotDragState.startY) / current.canvasTransform.scale;
+
+        // Convert pixel delta to percentage delta relative to node size
+        const dxPercent = (dx / current.hotspotDragState.nodeSize.x) * 100;
+        const dyPercent = (dy / current.hotspotDragState.nodeSize.y) * 100;
+
+        const newX = Math.min(Math.max(0, current.hotspotDragState.initialRect.x + dxPercent), 100 - current.hotspotDragState.initialRect.w);
+        const newY = Math.min(Math.max(0, current.hotspotDragState.initialRect.y + dyPercent), 100 - current.hotspotDragState.initialRect.h);
+
+        const activeSegment = current.story?.segments.find(s => s.id === current.story.activeSegmentId);
+        const node = activeSegment?.nodes[current.hotspotDragState.nodeId];
+        
+        if (node && node.type === NodeType.LOCATION) {
+           const locNode = node as LocationNode;
+           const newHotspots = locNode.hotspots.map(hs => 
+             hs.id === current.hotspotDragState!.hotspotId 
+             ? { ...hs, rect: { ...hs.rect, x: newX, y: newY } }
+             : hs
+           );
+           updateNode(node.id, { hotspots: newHotspots });
+        }
+      }
+      else if (current.hotspotResizeState) {
+        // Hotspot Resize Logic
+        const { startX, startY, initialRect, nodeSize, handle, nodeId, hotspotId } = current.hotspotResizeState;
+        
+        const dx = (e.clientX - startX) / current.canvasTransform.scale;
+        const dy = (e.clientY - startY) / current.canvasTransform.scale;
+        
+        const dxPercent = (dx / nodeSize.x) * 100;
+        const dyPercent = (dy / nodeSize.y) * 100;
+
+        let { x, y, w, h } = initialRect;
+
+        // Calculate new percentages based on handle
+        if (handle.includes('e')) {
+            w = Math.max(5, initialRect.w + dxPercent);
+        }
+        if (handle.includes('w')) {
+            const maxDelta = initialRect.w - 5;
+            const safeDx = Math.min(dxPercent, maxDelta);
+            x = initialRect.x + safeDx;
+            w = initialRect.w - safeDx;
+        }
+        if (handle.includes('s')) {
+            h = Math.max(5, initialRect.h + dyPercent);
+        }
+        if (handle.includes('n')) {
+            const maxDelta = initialRect.h - 5;
+            const safeDy = Math.min(dyPercent, maxDelta);
+            y = initialRect.y + safeDy;
+            h = initialRect.h - safeDy;
+        }
+
+        // Apply boundaries (0-100) - Basic clamping
+        if (x < 0) { w += x; x = 0; }
+        if (y < 0) { h += y; y = 0; }
+        if (x + w > 100) { w = 100 - x; }
+        if (y + h > 100) { h = 100 - y; }
+
+        const activeSegment = current.story?.segments.find(s => s.id === current.story.activeSegmentId);
+        const node = activeSegment?.nodes[nodeId];
+        
+        if (node && node.type === NodeType.LOCATION) {
+           const locNode = node as LocationNode;
+           const newHotspots = locNode.hotspots.map(hs => 
+             hs.id === hotspotId 
+             ? { ...hs, rect: { x, y, w, h } }
+             : hs
+           );
+           updateNode(node.id, { hotspots: newHotspots });
+        }
+      }
       else if (current.linkingState) {
-        // Calculate mouse position in canvas space, accounting for container offset
         const rect = containerRef.current?.getBoundingClientRect();
         const offsetX = rect ? rect.left : 0;
         const offsetY = rect ? rect.top : 0;
@@ -126,9 +228,7 @@ const Canvas: React.FC = () => {
           y: (e.clientY - offsetY - current.canvasTransform.y) / current.canvasTransform.scale
         };
         
-        // Update React state to trigger render
         setLinkingState({ ...current.linkingState, mousePos: pos });
-        // Update Ref immediately so next event sees it
         stateRef.current.linkingState = { ...current.linkingState, mousePos: pos };
       }
     };
@@ -139,18 +239,29 @@ const Canvas: React.FC = () => {
       if (current.dragState) {
         commitEditing(); 
         setDragState(null);
-        stateRef.current.dragState = null; // Clear ref immediately
+        stateRef.current.dragState = null;
+      }
+      
+      if (current.hotspotDragState) {
+        commitEditing();
+        setHotspotDragState(null);
+        stateRef.current.hotspotDragState = null;
+      }
+
+      if (current.hotspotResizeState) {
+        commitEditing();
+        setHotspotResizeState(null);
+        stateRef.current.hotspotResizeState = null;
       }
       
       if (current.isPanning) {
         setIsPanning(false);
-        stateRef.current.isPanning = false; // Clear ref immediately
+        stateRef.current.isPanning = false;
       }
 
-      // If linking and we hit window (not a node input), cancel
       if (current.linkingState) {
          setLinkingState(null);
-         stateRef.current.linkingState = null; // Clear ref immediately
+         stateRef.current.linkingState = null;
       }
     };
 
@@ -161,7 +272,7 @@ const Canvas: React.FC = () => {
       window.removeEventListener('mousemove', handleWindowMouseMove);
       window.removeEventListener('mouseup', handleWindowMouseUp);
     };
-  }, []); // Empty dependency array = listeners bound once
+  }, []);
 
   // --- Interaction Handlers ---
 
@@ -181,17 +292,16 @@ const Canvas: React.FC = () => {
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    // Only handle mouse down if it's strictly on the background (not stopped by HUD)
-    // The HUD elements have e.stopPropagation() so they won't trigger this.
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
       setIsPanning(true);
       setPanStart({ x: e.clientX, y: e.clientY });
       stateRef.current.isPanning = true;
       stateRef.current.panStart = { x: e.clientX, y: e.clientY };
-    } else if (e.target === containerRef.current) {
+    } else {
+        // Relaxed check: Any click bubbling here that isn't panning is a background click.
+        // All other interactive elements (Nodes, Edges, HUD) stopPropagation.
         clearSelection();
     }
-    // Close menu if clicking canvas
     setShowLogicMenu(false);
   };
 
@@ -221,10 +331,58 @@ const Canvas: React.FC = () => {
       initialPos: { ...node.position }
     };
 
-    // Update BOTH React State and Ref immediately
     setDragState(newDragState);
     stateRef.current.dragState = newDragState;
     setShowLogicMenu(false);
+  };
+
+  const handleHotspotMouseDown = (e: React.MouseEvent, nodeId: string, hotspot: Hotspot, nodeSize: Vector2) => {
+    e.stopPropagation(); // Prevent node drag
+    e.preventDefault(); 
+    if (e.button !== 0) return;
+
+    // Select the node so inspector shows properties
+    selectNode(nodeId, false);
+    startEditing(nodeId);
+
+    const newHotspotDragState = {
+       nodeId,
+       hotspotId: hotspot.id,
+       startX: e.clientX,
+       startY: e.clientY,
+       initialRect: { ...hotspot.rect },
+       nodeSize: { ...nodeSize }
+    };
+
+    setHotspotDragState(newHotspotDragState);
+    stateRef.current.hotspotDragState = newHotspotDragState;
+  };
+
+  const handleHotspotResizeMouseDown = (
+    e: React.MouseEvent, 
+    nodeId: string, 
+    hotspot: Hotspot, 
+    nodeSize: Vector2,
+    handle: 'nw' | 'ne' | 'sw' | 'se'
+  ) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (e.button !== 0) return;
+
+    startEditing(nodeId);
+
+    const newResizeState = {
+        nodeId,
+        hotspotId: hotspot.id,
+        handle,
+        startX: e.clientX,
+        startY: e.clientY,
+        initialRect: { ...hotspot.rect },
+        nodeSize: { ...nodeSize }
+    };
+
+    setHotspotResizeState(newResizeState);
+    stateRef.current.hotspotResizeState = newResizeState;
   };
 
   const handleHandleMouseDown = (e: React.MouseEvent, nodeId: string, handleId?: string) => {
@@ -241,18 +399,15 @@ const Canvas: React.FC = () => {
          mousePos: mouseCanvasPos
      };
 
-     // Update BOTH React State and Ref immediately to prevent input lag
      setLinkingState(newLinkingState);
      stateRef.current.linkingState = newLinkingState;
      setShowLogicMenu(false);
   };
 
   const handleInputMouseUp = (e: React.MouseEvent, targetNodeId: string) => {
-    // Check ref directly for most up-to-date state
     const currentLinking = stateRef.current.linkingState;
-    
     if (currentLinking) {
-        e.stopPropagation(); // Stop propagation to prevent window listener from cancelling link
+        e.stopPropagation(); 
         if (currentLinking.sourceNodeId !== targetNodeId) {
            addEdge(currentLinking.sourceNodeId, targetNodeId, currentLinking.sourceHandleId);
         }
@@ -268,7 +423,7 @@ const Canvas: React.FC = () => {
   };
 
   // --- Drag and Drop Creation ---
-
+  // ... (Same as before)
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
@@ -286,8 +441,6 @@ const Canvas: React.FC = () => {
   const onDragStart = (e: React.DragEvent, type: NodeType) => {
     e.dataTransfer.setData('nodeType', type);
     e.dataTransfer.effectAllowed = 'copy';
-    // Optional: Hide menu after drag starts
-    // setShowLogicMenu(false); 
   };
 
   const handleAddNode = (type: NodeType) => {
@@ -312,41 +465,28 @@ const Canvas: React.FC = () => {
       return { x: node.position.x, y: node.position.y + node.size.y / 2 };
     } else {
       // Logic for Multiple Outputs
-      
-      // 1. Dialogue Node Choices
       if (node.type === NodeType.DIALOGUE && handleId) {
         const choices = (node as DialogueNode).choices;
         const choiceIndex = choices.findIndex(c => c.id === handleId);
         if (choiceIndex === -1) return { x: node.position.x + node.size.x, y: node.position.y };
-        
-        // Match CSS visual alignment: 
-        // Bottom-up calculation to match mt-auto
-        // padding-bottom: 12px (p-[12px])
-        // item height: 24px (h-[24px])
-        // gap: 4px (gap-[4px])
         const reverseIndex = choices.length - 1 - choiceIndex;
-        // offset from bottom = padding + (index from bottom * (height + gap)) + half height
         const offsetFromBottom = 12 + (reverseIndex * (24 + 4)) + 12;
-        
-        // Correction: The handle is visually positioned at size.x - 2px (center).
         return { 
             x: node.position.x + node.size.x - 2, 
             y: node.position.y + node.size.y - offsetFromBottom
         };
       }
 
-      // 2. Branch Node Conditions
       if (node.type === NodeType.BRANCH) {
         const conditions = (node as BranchNode).conditions || [];
-        const labelOffset = 24; // text-[10px] leading-4 (16px) + mb-2 (8px) = 24px
-        const headerOffset = 24 + 12 + labelOffset; // Title (24) + Padding (12) + Label (24) = 60
+        const labelOffset = 24; 
+        const headerOffset = 24 + 12 + labelOffset;
         const itemHeight = 24;
-        const gap = 8; // space-y-2
+        const gap = 8; 
         
         if (handleId) {
             const index = conditions.findIndex(c => c.id === handleId);
             if (index !== -1) {
-                // Top-down calculation
                 const offsetFromTop = headerOffset + (index * (itemHeight + gap)) + (itemHeight / 2);
                 return {
                     x: node.position.x + node.size.x - 2,
@@ -354,10 +494,8 @@ const Canvas: React.FC = () => {
                 };
             }
         } else {
-             // Else handle (handleId is undefined for Branch default path)
-             // Positioned after all conditions
              const listHeight = conditions.length * (itemHeight + gap);
-             const elseMargin = 8; // mt-2
+             const elseMargin = 8; 
              const offsetFromTop = headerOffset + listHeight + elseMargin + (itemHeight / 2);
              return {
                 x: node.position.x + node.size.x - 2,
@@ -366,7 +504,20 @@ const Canvas: React.FC = () => {
         }
       }
 
-      // Default Single Output
+      if (node.type === NodeType.LOCATION && handleId) {
+         const events = (node as LocationNode).events || [];
+         const eventIndex = events.findIndex(e => e.id === handleId);
+         if (eventIndex === -1) return { x: node.position.x + node.size.x, y: node.position.y };
+
+         const reverseIndex = events.length - 1 - eventIndex;
+         const offsetFromBottom = 12 + (reverseIndex * (24 + 4)) + 12;
+
+         return {
+            x: node.position.x + node.size.x - 2,
+            y: node.position.y + node.size.y - offsetFromBottom
+         };
+      }
+
       return { x: node.position.x + node.size.x, y: node.position.y + node.size.y / 2 };
     }
   };
@@ -383,14 +534,12 @@ const Canvas: React.FC = () => {
             <div className="italic opacity-80 line-clamp-3 mb-2 flex-1 min-h-0">
               "{(node as DialogueNode).text}"
             </div>
-            {/* Using explicit pixel gap to ensure math alignment matches CSS visual */}
             <div className="flex flex-col gap-[4px] mt-auto shrink-0">
               {(node as DialogueNode).choices?.map((c) => (
                 <div key={c.id} className="relative flex items-center justify-end h-[24px] shrink-0 group/choice">
                     <div className="bg-black/20 px-2 py-1 rounded text-[10px] text-indigo-300 border border-indigo-500/20 w-full text-right truncate h-full flex items-center justify-end">
                       {c.text}
                     </div>
-                    {/* Output Handle for Choice */}
                     <div 
                       className="absolute -right-[18px] top-1/2 -translate-y-1/2 w-3 h-3 bg-indigo-600 border border-zinc-900 rounded-full hover:scale-125 transition-transform cursor-crosshair z-20"
                       onMouseDown={(e) => handleHandleMouseDown(e, node.id, c.id)}
@@ -402,16 +551,78 @@ const Canvas: React.FC = () => {
         );
       
       case NodeType.LOCATION:
+        const locNode = node as LocationNode;
+        const isSelected = selectedIds.includes(node.id);
+
         return (
-          <div className="w-full h-full relative">
-              <img 
-              src={(node as any).backgroundImage} 
-              className="absolute inset-0 w-full h-full object-cover opacity-40 grayscale group-hover:grayscale-0 transition-all" 
-              draggable={false}
-              />
-              <div className="relative z-10 p-2 text-center text-zinc-400">
-                场景预览
-              </div>
+          <div className="flex flex-col h-full">
+            <div className="w-full flex-1 min-h-0 relative bg-zinc-900 rounded border border-zinc-700/50 overflow-hidden group/image select-none">
+                {locNode.backgroundImage ? (
+                  <img 
+                    src={locNode.backgroundImage} 
+                    className="absolute inset-0 w-full h-full object-cover opacity-60 group-hover/image:opacity-100 transition-opacity pointer-events-none" 
+                    draggable={false}
+                  />
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center text-zinc-700 text-[10px]">No Image</div>
+                )}
+                
+                {/* Hotspot Overlay */}
+                {locNode.hotspots?.map(hs => (
+                   <div 
+                     key={hs.id}
+                     onMouseDown={(e) => handleHotspotMouseDown(e, node.id, hs, node.size)}
+                     className={`absolute border transition-colors cursor-move z-10 flex items-center justify-center overflow-hidden group/hotspot pointer-events-auto ${
+                        isSelected 
+                          ? 'border-amber-400 bg-amber-400/10' 
+                          : 'border/image:border-amber-400/30 group-hover/image:border-amber-400/30 hover:!border-amber-400 hover:!bg-amber-400/10'
+                     }`}
+                     style={{
+                        left: `${hs.rect.x}%`,
+                        top: `${hs.rect.y}%`,
+                        width: `${hs.rect.w}%`,
+                        height: `${hs.rect.h}%`
+                     }}
+                     title={`Hotspot: ${hs.name} (Drag to move)`}
+                   >
+                     {hs.image && (
+                        <img src={hs.image} className="w-full h-full object-contain pointer-events-none" draggable={false} />
+                     )}
+                     
+                     {/* Resize Handles - Only visible on hover or if node selected */}
+                     <div className="absolute inset-0 opacity-0 group-hover/hotspot:opacity-100 transition-opacity">
+                        <div className="absolute top-0 left-0 w-2 h-2 bg-white border border-black cursor-nwse-resize -translate-x-1/2 -translate-y-1/2" 
+                             onMouseDown={(e) => handleHotspotResizeMouseDown(e, node.id, hs, node.size, 'nw')} />
+                        <div className="absolute top-0 right-0 w-2 h-2 bg-white border border-black cursor-nesw-resize translate-x-1/2 -translate-y-1/2" 
+                             onMouseDown={(e) => handleHotspotResizeMouseDown(e, node.id, hs, node.size, 'ne')} />
+                        <div className="absolute bottom-0 left-0 w-2 h-2 bg-white border border-black cursor-nesw-resize -translate-x-1/2 translate-y-1/2" 
+                             onMouseDown={(e) => handleHotspotResizeMouseDown(e, node.id, hs, node.size, 'sw')} />
+                        <div className="absolute bottom-0 right-0 w-2 h-2 bg-white border border-black cursor-nwse-resize translate-x-1/2 translate-y-1/2" 
+                             onMouseDown={(e) => handleHotspotResizeMouseDown(e, node.id, hs, node.size, 'se')} />
+                     </div>
+                   </div>
+                ))}
+            </div>
+            
+            {/* Event List / Dynamic Ports */}
+            {locNode.events && locNode.events.length > 0 ? (
+               <div className="flex flex-col gap-[4px] mt-[4px] shrink-0">
+                 {locNode.events.map(evt => (
+                    <div key={evt.id} className="relative flex items-center justify-between h-[24px] shrink-0">
+                       <div className="flex items-center gap-1.5 px-2 bg-black/20 border border-zinc-700 rounded h-full w-full">
+                          <Zap className={`w-3 h-3 ${evt.trigger === 'onClick' ? 'text-amber-400' : 'text-indigo-400'}`} />
+                          <span className="text-[10px] text-zinc-300 truncate">{evt.label}</span>
+                       </div>
+                       <div 
+                          className="absolute -right-[18px] top-1/2 -translate-y-1/2 w-3 h-3 bg-zinc-500 border border-zinc-900 rounded-full hover:scale-125 transition-transform cursor-crosshair z-20"
+                          onMouseDown={(e) => handleHandleMouseDown(e, node.id, evt.id)}
+                        />
+                    </div>
+                 ))}
+               </div>
+            ) : (
+               <div className="p-1 text-center text-[10px] text-zinc-500 shrink-0">Default Exit</div>
+            )}
           </div>
         );
 
@@ -425,7 +636,6 @@ const Canvas: React.FC = () => {
                   <div className="bg-black/20 px-2 rounded text-[10px] text-amber-300 border border-amber-500/20 w-full truncate font-mono h-full flex items-center">
                     {idx + 1}. {c.expression}
                   </div>
-                  {/* Output Handle for Condition */}
                   <div 
                     className="absolute -right-[18px] top-1/2 -translate-y-1/2 w-3 h-3 bg-amber-600 border border-zinc-900 rounded-full hover:scale-125 transition-transform cursor-crosshair z-20"
                     onMouseDown={(e) => handleHandleMouseDown(e, node.id, c.id)}
@@ -437,12 +647,10 @@ const Canvas: React.FC = () => {
               )}
             </div>
              
-            {/* Explicit Else Block */}
             <div className="relative flex items-center h-6 shrink-0 mt-2">
                 <div className="bg-white/5 px-2 rounded text-[10px] text-zinc-500 border border-zinc-700/50 w-full truncate font-mono italic h-full flex items-center">
                     else
                 </div>
-                {/* Output Handle for Else (Default) */}
                 <div 
                     className="absolute -right-[18px] top-1/2 -translate-y-1/2 w-3 h-3 bg-zinc-500 border border-zinc-900 rounded-full hover:scale-125 transition-transform cursor-crosshair z-20"
                     onMouseDown={(e) => handleHandleMouseDown(e, node.id, undefined)} 
@@ -479,6 +687,34 @@ const Canvas: React.FC = () => {
           </div>
         );
 
+      case NodeType.ACTION:
+        const actionNode = node as ActionNode;
+        return (
+          <div className="flex flex-col h-full overflow-hidden">
+             <div className="flex-1 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
+                {actionNode.commands.map((cmd, idx) => {
+                  let Icon = MessageSquare;
+                  let Color = "text-zinc-400";
+                  if (cmd.type === 'playSound') { Icon = Zap; Color = "text-pink-400"; }
+                  if (cmd.type === 'wait') { Icon = Timer; Color = "text-blue-400"; }
+                  if (cmd.type === 'screenShake') { Icon = Smartphone; Color = "text-orange-400"; }
+                  if (cmd.type === 'showToast') { Icon = MessageSquare; Color = "text-green-400"; }
+                  
+                  return (
+                    <div key={cmd.id} className="flex items-center gap-2 bg-black/20 p-1.5 rounded border border-zinc-700/50 text-[10px]">
+                       <span className="text-zinc-600 font-mono w-4 text-center">{idx + 1}</span>
+                       <Icon className={`w-3 h-3 ${Color}`} />
+                       <span className="truncate text-zinc-300 font-mono">{cmd.type}</span>
+                    </div>
+                  );
+                })}
+                {actionNode.commands.length === 0 && (
+                   <div className="text-center text-zinc-600 italic text-[10px] mt-4">Empty Sequence</div>
+                )}
+             </div>
+          </div>
+        );
+
       default:
         return <div className="text-zinc-500 text-center mt-4">Unknown Node</div>;
     }
@@ -490,6 +726,7 @@ const Canvas: React.FC = () => {
       case NodeType.BRANCH: return 'bg-amber-900/50 text-amber-400';
       case NodeType.SET_VARIABLE: return 'bg-purple-900/50 text-purple-400';
       case NodeType.JUMP: return 'bg-rose-900/50 text-rose-400';
+      case NodeType.ACTION: return 'bg-slate-900/80 text-cyan-400';
       default: return 'bg-indigo-900/50 text-indigo-400';
     }
   };
@@ -500,6 +737,7 @@ const Canvas: React.FC = () => {
       case NodeType.BRANCH: return <GitGraph className="w-3 h-3" />;
       case NodeType.SET_VARIABLE: return <Variable className="w-3 h-3" />;
       case NodeType.JUMP: return <ArrowRightCircle className="w-3 h-3" />;
+      case NodeType.ACTION: return <Clapperboard className="w-3 h-3" />;
       default: return <Type className="w-3 h-3" />;
     }
   };
@@ -525,7 +763,7 @@ const Canvas: React.FC = () => {
 
       {/* Canvas Content */}
       <div 
-        className="absolute inset-0 origin-top-left"
+        className="absolute inset-0 origin-top-left pointer-events-none"
         style={{
           transform: `translate(${canvasTransform.x}px, ${canvasTransform.y}px) scale(${canvasTransform.scale})`
         }}
@@ -581,21 +819,21 @@ const Canvas: React.FC = () => {
 
         {/* Nodes Layer */}
         {nodes.map(node => {
-          // Determine if we should show the default output handle
-          // For Dialogue nodes: Only if NO choices exist
           const isDialogue = node.type === NodeType.DIALOGUE;
           const isBranch = node.type === NodeType.BRANCH;
-          const hasChoices = isDialogue && (node as DialogueNode).choices && (node as DialogueNode).choices.length > 0;
+          const isLocation = node.type === NodeType.LOCATION;
           
-          // Branch nodes never show default centered handle (they have specific Else handle)
-          const showDefaultHandle = !isBranch && (!isDialogue || !hasChoices);
+          const hasChoices = isDialogue && (node as DialogueNode).choices && (node as DialogueNode).choices.length > 0;
+          const hasEvents = isLocation && (node as LocationNode).events && (node as LocationNode).events.length > 0;
+          
+          const showDefaultHandle = !isBranch && !hasChoices && !hasEvents;
           
           return (
           <div
             key={node.id}
             onMouseDown={(e) => handleNodeMouseDown(e, node)}
             onMouseUp={(e) => handleInputMouseUp(e, node.id)} 
-            className={`absolute border transition-shadow duration-150 group flex flex-col
+            className={`absolute border transition-shadow duration-150 group flex flex-col pointer-events-auto
               ${selectedIds.includes(node.id) ? 'border-indigo-500 ring-1 ring-indigo-500 shadow-xl' : 'border-zinc-700 hover:border-zinc-500'}
               bg-zinc-800 rounded-md overflow-hidden
             `}
@@ -628,7 +866,6 @@ const Canvas: React.FC = () => {
             </div>
 
             {/* Node Content */}
-            {/* Using explicit pixel padding to match geometry math: p-[12px] */}
             <div className="p-[12px] text-zinc-300 text-xs flex-1 overflow-hidden relative flex flex-col">
                {renderNodeContent(node)}
             </div>
@@ -641,7 +878,6 @@ const Canvas: React.FC = () => {
         className="absolute top-4 left-1/2 -translate-x-1/2 bg-zinc-800 rounded-lg shadow-xl border border-zinc-700 flex items-center p-1 gap-1 z-30 select-none"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        {/* Selection Tool */}
         <button 
           className="p-2 hover:bg-zinc-700 rounded text-white" 
           title="选择 (V)"
@@ -652,7 +888,6 @@ const Canvas: React.FC = () => {
         
         <div className="w-px h-4 bg-zinc-700 mx-1"></div>
         
-        {/* Narrative Group */}
         <button 
           draggable
           onDragStart={(e) => onDragStart(e, NodeType.DIALOGUE)}
@@ -676,7 +911,6 @@ const Canvas: React.FC = () => {
 
         <div className="w-px h-4 bg-zinc-700 mx-1"></div>
 
-        {/* Logic Group (Dropdown) */}
         <div className="relative">
           <button 
             className={`p-2 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white flex items-center gap-1 ${showLogicMenu ? 'bg-zinc-700 text-white' : ''}`}
@@ -689,7 +923,7 @@ const Canvas: React.FC = () => {
           </button>
 
           {showLogicMenu && (
-            <div className="absolute top-full left-0 mt-2 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl p-1 flex flex-col gap-1 min-w-[120px]">
+            <div className="absolute top-full left-0 mt-2 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl p-1 flex flex-col gap-1 min-w-[140px]">
                <button 
                 draggable
                 onDragStart={(e) => onDragStart(e, NodeType.BRANCH)}
@@ -710,6 +944,15 @@ const Canvas: React.FC = () => {
               </button>
                <button 
                 draggable
+                onDragStart={(e) => onDragStart(e, NodeType.ACTION)}
+                className="flex items-center gap-2 p-2 hover:bg-zinc-700 rounded text-zinc-300 hover:text-cyan-400 text-left w-full cursor-grab active:cursor-grabbing"
+                onClick={() => handleAddNode(NodeType.ACTION)}
+              >
+                <Clapperboard className="w-4 h-4" />
+                <span className="text-xs">动作序列</span>
+              </button>
+               <button 
+                draggable
                 onDragStart={(e) => onDragStart(e, NodeType.JUMP)}
                 className="flex items-center gap-2 p-2 hover:bg-zinc-700 rounded text-zinc-300 hover:text-rose-400 text-left w-full cursor-grab active:cursor-grabbing"
                 onClick={() => handleAddNode(NodeType.JUMP)}
@@ -722,7 +965,6 @@ const Canvas: React.FC = () => {
         </div>
       </div>
 
-      {/* Zoom Controls HUD */}
       <div 
         className="absolute bottom-4 left-4 flex flex-col gap-2 z-30"
         onMouseDown={(e) => e.stopPropagation()}
