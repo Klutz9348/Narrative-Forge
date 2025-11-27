@@ -16,8 +16,8 @@ export interface NodeData {
   name: string;
   position: Vector2;
   size: Vector2;
-  parentId?: string;
-  childrenIds: string[];
+  // Visual specific: does this node have dynamic outputs?
+  childrenIds?: string[]; // Deprecated in favor of edges, kept for compatibility if needed
 }
 
 export interface DialogueNode extends NodeData {
@@ -35,10 +35,18 @@ export interface LocationNode extends NodeData {
 
 export type NarrativeNode = DialogueNode | LocationNode | NodeData;
 
+export interface Edge {
+  id: string;
+  sourceNodeId: string;
+  targetNodeId: string;
+  sourceHandleId?: string; // For nodes with multiple outputs (e.g. choices)
+}
+
 export interface SegmentAsset {
   id: string;
   name: string;
   nodes: Record<string, NarrativeNode>;
+  edges: Edge[];
   rootNodeId: string;
 }
 

@@ -63,6 +63,6 @@ export const expandSceneDescription = async (
     return response.text || "";
   } catch (error) {
     console.error("Gemini API Error:", error);
-    return "Error generating description.";
+    return "生成描述时出错。";
   }
 };
