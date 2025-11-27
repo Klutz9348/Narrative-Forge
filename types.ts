@@ -9,7 +9,7 @@ export enum NodeType {
   LOCATION = 'LOCATION',
   BRANCH = 'BRANCH',
   JUMP = 'JUMP',
-  SET_VARIABLE = 'SET_VARIABLE', // 新增：变量修改节点
+  SET_VARIABLE = 'SET_VARIABLE',
 }
 
 export interface NodeData {
@@ -28,12 +28,21 @@ export interface DialogueNode extends NodeData {
   characterId: string;
   text: string;
   choices: { id: string; text: string; nextNodeId?: string }[];
+  
+  // Add-ons (Optional Modules)
+  voiceId?: string;
+  expression?: string;
+  placement?: 'left' | 'center' | 'right';
 }
 
 export interface LocationNode extends NodeData {
   type: NodeType.LOCATION;
   backgroundImage: string;
-  hotspots: { id: string; rect: { x: number; y: number; w: number; h: number }; action: string }[];
+  
+  // Add-ons (Optional Modules)
+  hotspots?: { id: string; rect: { x: number; y: number; w: number; h: number }; action: string }[];
+  bgm?: string;
+  filter?: string;
 }
 
 // 新增：分支节点
@@ -45,8 +54,9 @@ export interface BranchNode extends NodeData {
     expression: string; // 例如: "coin >= 5" 或 "hasKey == true"
     // 注意：实际的连接关系存储在 SegmentAsset.edges 中，这里的 ID 主要用于 UI 对应
   }[];
-  // 默认路径（当所有条件都不满足时）
-  defaultNextNodeId?: string; 
+  
+  // Add-ons (Optional Modules)
+  defaultNextNodeId?: string; // Else path
 }
 
 // 新增：变量设置节点
@@ -55,6 +65,9 @@ export interface VariableSetterNode extends NodeData {
   variableName: string;   // 要修改的变量名，如 "coin"
   operator: 'SET' | 'ADD' | 'SUB'; // 操作符：赋值、加、减
   value: string;          // 值，如 "10", "true", "player_name"
+  
+  // Add-ons
+  isAdvanced?: boolean; // If true, value is treated as an expression formula
 }
 
 // 新增：跳转节点 (跨章节)

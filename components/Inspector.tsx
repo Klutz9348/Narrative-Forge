@@ -1,6 +1,7 @@
+
 import React, { useState } from 'react';
-import { MousePointer2, MoreVertical, Wand2, Plus, Trash2, ArrowRightCircle } from 'lucide-react';
-import { NodeType, DialogueNode, BranchNode, VariableSetterNode, JumpNode } from '../types';
+import { MousePointer2, MoreVertical, Wand2, Plus, Trash2, ArrowRightCircle, Mic, Music, LayoutTemplate, Settings2, Code, Split } from 'lucide-react';
+import { NodeType, DialogueNode, BranchNode, VariableSetterNode, JumpNode, LocationNode } from '../types';
 import * as GeminiService from '../services/geminiService';
 import { useEditorStore } from '../store/useEditorStore';
 
@@ -12,6 +13,27 @@ const NODE_TYPE_LABELS: Record<NodeType, string> = {
   [NodeType.SET_VARIABLE]: '设置变量 (Set Var)',
 };
 
+// Definition of available add-ons per node type
+const ADDON_DEFINITIONS: Record<NodeType, { key: string; label: string; icon: React.ReactNode; defaultValue: any }[]> = {
+  [NodeType.DIALOGUE]: [
+    { key: 'voiceId', label: '语音 (Voiceover)', icon: <Mic className="w-3 h-3"/>, defaultValue: '' },
+    { key: 'expression', label: '表情 (Expression)', icon: <Settings2 className="w-3 h-3"/>, defaultValue: 'neutral' },
+    { key: 'placement', label: '站位 (Placement)', icon: <LayoutTemplate className="w-3 h-3"/>, defaultValue: 'center' }
+  ],
+  [NodeType.LOCATION]: [
+    { key: 'bgm', label: '背景音乐 (BGM)', icon: <Music className="w-3 h-3"/>, defaultValue: '' },
+    { key: 'hotspots', label: '热区交互 (Hotspots)', icon: <MousePointer2 className="w-3 h-3"/>, defaultValue: [] },
+    { key: 'filter', label: '视觉滤镜 (Filter)', icon: <Settings2 className="w-3 h-3"/>, defaultValue: 'none' }
+  ],
+  [NodeType.BRANCH]: [
+    { key: 'defaultNextNodeId', label: '默认路径 (Else Path)', icon: <Split className="w-3 h-3"/>, defaultValue: '' }
+  ],
+  [NodeType.SET_VARIABLE]: [
+    { key: 'isAdvanced', label: '高级模式 (Advanced)', icon: <Code className="w-3 h-3"/>, defaultValue: true }
+  ],
+  [NodeType.JUMP]: []
+};
+
 const Inspector: React.FC = () => {
   const { story, selectedIds, updateNode, startEditing, commitEditing } = useEditorStore();
   
@@ -20,15 +42,14 @@ const Inspector: React.FC = () => {
   
   const [isGenerating, setIsGenerating] = useState(false);
   const [aiVariations, setAiVariations] = useState<string[]>([]);
+  const [showAddonMenu, setShowAddonMenu] = useState(false);
 
   const handleAiGenerate = async () => {
     if (!selectedNode || selectedNode.type !== NodeType.DIALOGUE) return;
     setIsGenerating(true);
     setAiVariations([]);
     
-    // Explicitly cast to DialogueNode
     const dialogueNode = selectedNode as DialogueNode;
-
     const charName = story.characters.find(c => c.id === dialogueNode.characterId)?.name || "未知角色";
     const variations = await GeminiService.generateDialogueVariations(charName, dialogueNode.text);
     
@@ -36,35 +57,21 @@ const Inspector: React.FC = () => {
     setIsGenerating(false);
   };
 
-  // --- Helper Functions for Branch Node ---
-  const addCondition = () => {
-    if (!selectedNode || selectedNode.type !== NodeType.BRANCH) return;
-    const node = selectedNode as BranchNode;
-    startEditing(node.id);
-    const newConditions = [
-      ...(node.conditions || []),
-      { id: `cond_${Date.now()}`, expression: 'true' }
-    ];
-    updateNode(node.id, { conditions: newConditions });
+  // Helper: Enable an add-on module
+  const enableAddon = (key: string, defaultValue: any) => {
+    if (!selectedNode) return;
+    startEditing(selectedNode.id);
+    updateNode(selectedNode.id, { [key]: defaultValue });
     commitEditing();
+    setShowAddonMenu(false);
   };
 
-  const removeCondition = (conditionId: string) => {
-    if (!selectedNode || selectedNode.type !== NodeType.BRANCH) return;
-    const node = selectedNode as BranchNode;
-    startEditing(node.id);
-    const newConditions = node.conditions.filter(c => c.id !== conditionId);
-    updateNode(node.id, { conditions: newConditions });
+  // Helper: Disable/Remove an add-on module
+  const removeAddon = (key: string) => {
+    if (!selectedNode) return;
+    startEditing(selectedNode.id);
+    updateNode(selectedNode.id, { [key]: undefined });
     commitEditing();
-  };
-
-  const updateCondition = (conditionId: string, expression: string) => {
-    if (!selectedNode || selectedNode.type !== NodeType.BRANCH) return;
-    const node = selectedNode as BranchNode;
-    const newConditions = node.conditions.map(c => 
-      c.id === conditionId ? { ...c, expression } : c
-    );
-    updateNode(node.id, { conditions: newConditions });
   };
 
   if (!selectedNode) {
@@ -76,13 +83,17 @@ const Inspector: React.FC = () => {
     );
   }
 
+  // Determine available addons that are NOT yet enabled
+  const availableAddons = ADDON_DEFINITIONS[selectedNode.type]?.filter(addon => (selectedNode as any)[addon.key] === undefined) || [];
+
   return (
-    <div className="w-80 bg-zinc-900 border-l border-zinc-800 h-full flex flex-col overflow-y-auto z-10 custom-scrollbar">
-      {/* Header */}
-      <div className="p-4 border-b border-zinc-800">
+    <div className="w-80 bg-zinc-900 border-l border-zinc-800 h-full flex flex-col z-10">
+      
+      {/* 1. HEADER (Always Visible) */}
+      <div className="p-4 border-b border-zinc-800 shrink-0">
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs font-mono text-zinc-500 uppercase">{NODE_TYPE_LABELS[selectedNode.type] || selectedNode.type}</span>
-          <MoreVertical className="w-4 h-4 text-zinc-500 cursor-pointer" />
+          <div className="text-[10px] text-zinc-600 font-mono">ID: {selectedNode.id.slice(-6)}</div>
         </div>
         <input 
           type="text" 
@@ -92,60 +103,42 @@ const Inspector: React.FC = () => {
           onBlur={commitEditing}
           className="bg-transparent text-lg font-bold text-white w-full focus:outline-none focus:ring-1 focus:ring-indigo-500 rounded px-1 -ml-1"
         />
-        <div className="text-[10px] text-zinc-600 font-mono mt-1">ID: {selectedNode.id}</div>
-      </div>
-
-      <div className="p-4 space-y-6">
-        {/* Transform (Common for all nodes) */}
-        <div className="space-y-3">
-          <label className="text-xs font-semibold text-zinc-500 uppercase">变换 (Transform)</label>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="text-[10px] text-zinc-500 block mb-1">X</label>
-              <input 
+        
+        {/* Transform Info */}
+        <div className="flex gap-4 mt-3">
+          <div className="flex items-center gap-2">
+             <span className="text-[10px] text-zinc-500 uppercase">X</span>
+             <input 
                 type="number" 
                 value={selectedNode.position.x}
                 onFocus={() => startEditing(selectedNode.id)}
                 onChange={(e) => updateNode(selectedNode.id, { position: { ...selectedNode.position, x: parseInt(e.target.value) || 0 } })}
                 onBlur={commitEditing}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-300"
+                className="w-16 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5 text-xs text-zinc-300 font-mono text-right"
               />
-            </div>
-            <div>
-              <label className="text-[10px] text-zinc-500 block mb-1">Y</label>
-              <input 
+          </div>
+          <div className="flex items-center gap-2">
+             <span className="text-[10px] text-zinc-500 uppercase">Y</span>
+             <input 
                 type="number" 
                 value={selectedNode.position.y}
                 onFocus={() => startEditing(selectedNode.id)}
                 onChange={(e) => updateNode(selectedNode.id, { position: { ...selectedNode.position, y: parseInt(e.target.value) || 0 } })}
                 onBlur={commitEditing}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-300"
+                className="w-16 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5 text-xs text-zinc-300 font-mono text-right"
               />
-            </div>
           </div>
         </div>
+      </div>
 
-        <div className="w-full h-px bg-zinc-800" />
-
-        {/* --- Specific Properties based on Type --- */}
-
-        {/* 1. DIALOGUE NODE */}
+      <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-6">
+        
+        {/* 2. CORE PAYLOAD (Minimal Set) */}
+        
         {selectedNode.type === NodeType.DIALOGUE && (
-          <div className="space-y-3">
-            <div className="flex justify-between items-center">
-               <label className="text-xs font-semibold text-zinc-500 uppercase">对话内容</label>
-               <button 
-                onClick={handleAiGenerate}
-                disabled={isGenerating}
-                className="text-[10px] bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white px-2 py-1 rounded flex items-center gap-1 disabled:opacity-50"
-               >
-                 <Wand2 className="w-3 h-3" />
-                 {isGenerating ? 'AI 生成中...' : 'AI 润色'}
-               </button>
-            </div>
-
-            <div>
-              <label className="text-[10px] text-zinc-500 block mb-1">角色</label>
+          <div className="space-y-4">
+             <div>
+              <label className="text-[10px] text-zinc-500 uppercase font-semibold block mb-1.5">角色 (Character)</label>
               <select 
                 value={(selectedNode as DialogueNode).characterId}
                 onChange={(e) => {
@@ -153,159 +146,249 @@ const Inspector: React.FC = () => {
                   updateNode(selectedNode.id, { characterId: e.target.value });
                   commitEditing();
                 }}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-300 focus:outline-none"
+                className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-sm text-zinc-300 focus:outline-none"
               >
                 {story.characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
 
             <div>
-              <label className="text-[10px] text-zinc-500 block mb-1">台词</label>
+              <div className="flex justify-between items-center mb-1.5">
+                 <label className="text-[10px] text-zinc-500 uppercase font-semibold">台词 (Line)</label>
+                 <button 
+                  onClick={handleAiGenerate}
+                  disabled={isGenerating}
+                  className="text-[10px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 disabled:opacity-50"
+                 >
+                   <Wand2 className="w-3 h-3" />
+                   AI 润色
+                 </button>
+              </div>
               <textarea 
-                rows={5}
+                rows={4}
                 value={(selectedNode as DialogueNode).text}
                 onFocus={() => startEditing(selectedNode.id)}
                 onChange={(e) => updateNode(selectedNode.id, { text: e.target.value })}
                 onBlur={commitEditing}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-2 text-sm text-zinc-300 resize-none focus:ring-1 focus:ring-indigo-500 focus:outline-none"
               />
-            </div>
-
-            {aiVariations.length > 0 && (
-              <div className="bg-zinc-800/50 p-2 rounded border border-indigo-500/30">
-                <span className="text-[10px] text-indigo-400 font-bold block mb-2">Gemini 建议:</span>
-                <div className="space-y-2">
-                  {aiVariations.map((v, i) => (
-                    <div 
-                      key={i} 
-                      onClick={() => {
-                        startEditing(selectedNode.id);
-                        updateNode(selectedNode.id, { text: v });
-                        commitEditing();
-                      }}
-                      className="text-xs text-zinc-300 p-2 bg-zinc-800 hover:bg-zinc-700 rounded cursor-pointer border border-zinc-700"
-                    >
-                      {v}
-                    </div>
-                  ))}
+              
+              {/* AI Variations Dropdown */}
+              {aiVariations.length > 0 && (
+                <div className="mt-2 bg-zinc-800/50 p-2 rounded border border-indigo-500/30">
+                  <span className="text-[10px] text-indigo-400 font-bold block mb-2">建议:</span>
+                  <div className="space-y-1">
+                    {aiVariations.map((v, i) => (
+                      <button 
+                        key={i} 
+                        onClick={() => {
+                          startEditing(selectedNode.id);
+                          updateNode(selectedNode.id, { text: v });
+                          commitEditing();
+                          setAiVariations([]); // Clear after selection
+                        }}
+                        className="text-xs text-left w-full text-zinc-300 p-1.5 hover:bg-zinc-700 rounded border border-transparent hover:border-zinc-600 transition-colors"
+                      >
+                        {v}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* 2. BRANCH NODE */}
-        {selectedNode.type === NodeType.BRANCH && (
-          <div className="space-y-3">
-            <div className="flex justify-between items-center">
-               <label className="text-xs font-semibold text-zinc-500 uppercase">分支条件 (Conditions)</label>
-               <button 
-                 onClick={addCondition}
-                 className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white"
-                 title="添加条件"
-               >
-                 <Plus className="w-3 h-3" />
-               </button>
-            </div>
-            
-            <div className="space-y-2">
-              {(selectedNode as BranchNode).conditions?.map((condition, idx) => (
-                <div key={condition.id} className="flex gap-2 items-center">
-                  <div className="text-[10px] text-zinc-500 w-4 font-mono">{idx + 1}</div>
-                  <input
-                    type="text"
-                    value={condition.expression}
-                    onFocus={() => startEditing(selectedNode.id)}
-                    onChange={(e) => updateCondition(condition.id, e.target.value)}
-                    onBlur={commitEditing}
-                    placeholder="例如: coin >= 5"
-                    className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-300 font-mono"
-                  />
-                  <button 
-                    onClick={() => removeCondition(condition.id)}
-                    className="text-zinc-600 hover:text-red-400"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
-                </div>
-              ))}
-              {(!(selectedNode as BranchNode).conditions || (selectedNode as BranchNode).conditions.length === 0) && (
-                 <div className="text-xs text-zinc-600 italic text-center py-2">无条件，请点击 + 添加</div>
               )}
             </div>
-            
-            <div className="text-[10px] text-zinc-500 pt-2 border-t border-zinc-800">
-              提示：每行条件将在画布上生成一个输出连接点。
+
+            <div>
+               <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-[10px] text-zinc-500 uppercase font-semibold">选项 (Choices)</label>
+                  <button 
+                    onClick={() => {
+                      const node = selectedNode as DialogueNode;
+                      startEditing(node.id);
+                      const newId = `c_${Date.now()}`;
+                      updateNode(node.id, { choices: [...(node.choices || []), { id: newId, text: '新选项' }] });
+                      commitEditing();
+                    }}
+                    className="p-1 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded transition-colors"
+                    title="添加选项"
+                  >
+                    <Plus className="w-3 h-3" />
+                  </button>
+               </div>
+               
+               <div className="space-y-2">
+                 {(selectedNode as DialogueNode).choices?.map((c, i) => (
+                    <div key={c.id} className="flex gap-2 items-center group">
+                       <input 
+                         className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-indigo-500"
+                         value={c.text} 
+                         onFocus={() => startEditing(selectedNode.id)}
+                         onChange={(e) => {
+                            const node = selectedNode as DialogueNode;
+                            const newChoices = [...node.choices];
+                            newChoices[i] = { ...c, text: e.target.value };
+                            updateNode(node.id, { choices: newChoices });
+                         }}
+                         onBlur={commitEditing}
+                         placeholder="选项文本..."
+                       />
+                       <button 
+                          onClick={() => {
+                            const node = selectedNode as DialogueNode;
+                            startEditing(node.id);
+                            const newChoices = node.choices.filter(choice => choice.id !== c.id);
+                            updateNode(node.id, { choices: newChoices });
+                            commitEditing();
+                          }}
+                          className="p-1.5 text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                          title="删除选项"
+                       >
+                          <Trash2 className="w-3 h-3" />
+                       </button>
+                    </div>
+                 ))}
+                 
+                 {(!((selectedNode as DialogueNode).choices?.length)) && (
+                    <div className="text-[10px] text-zinc-600 italic border border-dashed border-zinc-800 p-3 rounded text-center">
+                       暂无选项
+                       <div className="mt-1 text-zinc-700">将使用默认输出端口连接下一节点。</div>
+                    </div>
+                 )}
+               </div>
             </div>
           </div>
         )}
 
-        {/* 3. SET VARIABLE NODE */}
-        {selectedNode.type === NodeType.SET_VARIABLE && (
-           <div className="space-y-3">
-             <label className="text-xs font-semibold text-zinc-500 uppercase">变量操作</label>
-             
+        {selectedNode.type === NodeType.LOCATION && (
+          <div className="space-y-4">
              <div>
-               <label className="text-[10px] text-zinc-500 block mb-1">变量名</label>
+              <label className="text-[10px] text-zinc-500 uppercase font-semibold block mb-1.5">背景图 (Image)</label>
+              <input 
+                  type="text" 
+                  value={(selectedNode as LocationNode).backgroundImage}
+                  onFocus={() => startEditing(selectedNode.id)}
+                  onChange={(e) => updateNode(selectedNode.id, { backgroundImage: e.target.value })}
+                  onBlur={commitEditing}
+                  placeholder="Image URL..."
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-500 truncate mb-2"
+              />
+              <div className="w-full aspect-video bg-zinc-900 rounded border border-zinc-800 overflow-hidden relative group">
+                {(selectedNode as LocationNode).backgroundImage ? (
+                  <img src={(selectedNode as LocationNode).backgroundImage} className="w-full h-full object-cover" />
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center text-zinc-700 text-xs">No Image</div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {selectedNode.type === NodeType.BRANCH && (
+           <div className="space-y-4">
+              <label className="text-[10px] text-zinc-500 uppercase font-semibold block mb-1.5">条件列表 (Conditions)</label>
+              <div className="space-y-2">
+                {(selectedNode as BranchNode).conditions?.map((condition, idx) => (
+                  <div key={condition.id} className="flex gap-2 items-center group">
+                    <div className="text-[10px] text-zinc-500 w-4 font-mono text-center">{idx + 1}</div>
+                    <input
+                      type="text"
+                      value={condition.expression}
+                      onFocus={() => startEditing(selectedNode.id)}
+                      onChange={(e) => {
+                         const node = selectedNode as BranchNode;
+                         const newConditions = node.conditions.map(c => c.id === condition.id ? { ...c, expression: e.target.value } : c);
+                         updateNode(node.id, { conditions: newConditions });
+                      }}
+                      onBlur={commitEditing}
+                      className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-300 font-mono"
+                    />
+                    <button 
+                      onClick={() => {
+                        const node = selectedNode as BranchNode;
+                        startEditing(node.id);
+                        updateNode(node.id, { conditions: node.conditions.filter(c => c.id !== condition.id) });
+                        commitEditing();
+                      }}
+                      className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400 transition-opacity"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+                
+                <button 
+                  onClick={() => {
+                    const node = selectedNode as BranchNode;
+                    startEditing(node.id);
+                    updateNode(node.id, { conditions: [...(node.conditions || []), { id: `c_${Date.now()}`, expression: 'true' }] });
+                    commitEditing();
+                  }}
+                  className="w-full py-1.5 border border-dashed border-zinc-700 hover:border-zinc-500 rounded text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors flex items-center justify-center gap-1"
+                >
+                  <Plus className="w-3 h-3" /> 添加条件
+                </button>
+              </div>
+           </div>
+        )}
+
+        {selectedNode.type === NodeType.SET_VARIABLE && (
+          <div className="space-y-4">
+             <div>
+               <label className="text-[10px] text-zinc-500 uppercase font-semibold block mb-1.5">变量名 (Variable Name)</label>
                <input 
                  type="text" 
                  value={(selectedNode as VariableSetterNode).variableName || ''}
                  onFocus={() => startEditing(selectedNode.id)}
-                 onChange={(e) => {
-                    updateNode(selectedNode.id, { variableName: e.target.value });
-                 }}
+                 onChange={(e) => updateNode(selectedNode.id, { variableName: e.target.value })}
                  onBlur={commitEditing}
-                 placeholder="例如: has_key"
-                 className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-300 font-mono"
+                 className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-sm text-zinc-300 font-mono"
                />
              </div>
 
-             <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[10px] text-zinc-500 block mb-1">操作符</label>
-                  <select
-                    value={(selectedNode as VariableSetterNode).operator || 'SET'}
-                    onChange={(e) => {
-                      startEditing(selectedNode.id);
-                      updateNode(selectedNode.id, { operator: e.target.value as any });
-                      commitEditing();
-                    }}
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-300"
-                  >
-                    <option value="SET">赋值 (=)</option>
-                    <option value="ADD">增加 (+)</option>
-                    <option value="SUB">减少 (-)</option>
-                  </select>
+             {/* Simple Mode UI (Hidden if Advanced Module is active) */}
+             {!(selectedNode as VariableSetterNode).isAdvanced && (
+                <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] text-zinc-500 uppercase font-semibold block mb-1.5">操作 (Op)</label>
+                      <select
+                        value={(selectedNode as VariableSetterNode).operator || 'SET'}
+                        onChange={(e) => {
+                          startEditing(selectedNode.id);
+                          updateNode(selectedNode.id, { operator: e.target.value as any });
+                          commitEditing();
+                        }}
+                        className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-300"
+                      >
+                        <option value="SET">赋值 (=)</option>
+                        <option value="ADD">增加 (+)</option>
+                        <option value="SUB">减少 (-)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-zinc-500 uppercase font-semibold block mb-1.5">值 (Value)</label>
+                      <input 
+                        type="text" 
+                        value={(selectedNode as VariableSetterNode).value || ''}
+                        onFocus={() => startEditing(selectedNode.id)}
+                        onChange={(e) => updateNode(selectedNode.id, { value: e.target.value })}
+                        onBlur={commitEditing}
+                        className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-sm text-zinc-300 font-mono"
+                      />
+                    </div>
                 </div>
-                <div>
-                   <label className="text-[10px] text-zinc-500 block mb-1">值</label>
-                   <input 
-                     type="text" 
-                     value={(selectedNode as VariableSetterNode).value || ''}
-                     onFocus={() => startEditing(selectedNode.id)}
-                     onChange={(e) => updateNode(selectedNode.id, { value: e.target.value })}
-                     onBlur={commitEditing}
-                     placeholder="true / 10"
-                     className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-300 font-mono"
-                   />
-                </div>
-             </div>
-           </div>
+             )}
+          </div>
         )}
 
-        {/* 4. JUMP NODE */}
         {selectedNode.type === NodeType.JUMP && (
-          <div className="space-y-3">
-            <label className="text-xs font-semibold text-zinc-500 uppercase">跳转目标</label>
-            <div className="p-2 bg-indigo-900/20 border border-indigo-500/30 rounded flex items-start gap-2">
-               <ArrowRightCircle className="w-4 h-4 text-indigo-400 mt-0.5" />
+           <div className="space-y-4">
+             <div className="p-2 bg-indigo-900/20 border border-indigo-500/30 rounded flex items-start gap-2">
+               <ArrowRightCircle className="w-4 h-4 text-indigo-400 mt-0.5 shrink-0" />
                <div className="text-xs text-indigo-200">
-                 此节点将结束当前章节，并加载所选的目标章节。
+                 结束当前章节，跳转至下一章。
                </div>
             </div>
-            
             <div>
-              <label className="text-[10px] text-zinc-500 block mb-1">目标章节</label>
+              <label className="text-[10px] text-zinc-500 uppercase font-semibold block mb-1.5">目标章节 (Target)</label>
               <select
                  value={(selectedNode as JumpNode).targetSegmentId || ''}
                  onChange={(e) => {
@@ -313,7 +396,7 @@ const Inspector: React.FC = () => {
                    updateNode(selectedNode.id, { targetSegmentId: e.target.value });
                    commitEditing();
                  }}
-                 className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-300"
+                 className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-sm text-zinc-300"
               >
                 <option value="">-- 选择章节 --</option>
                 {story.segments.map(seg => (
@@ -321,33 +404,215 @@ const Inspector: React.FC = () => {
                 ))}
               </select>
             </div>
+           </div>
+        )}
+
+
+        {/* 3. MODULES / ADD-ONS (Optional) */}
+        
+        {/* Module: Voiceover */}
+        {(selectedNode as DialogueNode).voiceId !== undefined && (
+          <div className="border border-zinc-700 rounded bg-zinc-800/30 p-3 relative group">
+             <button onClick={() => removeAddon('voiceId')} className="absolute top-2 right-2 text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 className="w-3 h-3" /></button>
+             <div className="flex items-center gap-2 mb-2 text-indigo-400">
+                <Mic className="w-3 h-3" />
+                <span className="text-xs font-bold uppercase">语音配置</span>
+             </div>
+             <input 
+                type="text"
+                placeholder="Voice ID / URL..."
+                value={(selectedNode as DialogueNode).voiceId}
+                onChange={(e) => {
+                   startEditing(selectedNode.id);
+                   updateNode(selectedNode.id, { voiceId: e.target.value });
+                }}
+                onBlur={commitEditing}
+                className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-300"
+             />
           </div>
         )}
 
-        {/* 5. LOCATION NODE */}
-        {selectedNode.type === NodeType.LOCATION && (
-          <div className="space-y-3">
-             <label className="text-xs font-semibold text-zinc-500 uppercase">场景数据</label>
-             <div>
-              <label className="text-[10px] text-zinc-500 block mb-1">背景图片 URL</label>
-              <input 
-                  type="text" 
-                  value={(selectedNode as any).backgroundImage}
-                  onFocus={() => startEditing(selectedNode.id)}
-                  onChange={(e) => updateNode(selectedNode.id, { backgroundImage: e.target.value })}
-                  onBlur={commitEditing}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-500 truncate"
-              />
-              <div className="mt-2 w-full h-24 bg-zinc-800 rounded overflow-hidden relative group">
-                <img src={(selectedNode as any).backgroundImage} className="w-full h-full object-cover opacity-50" />
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="text-xs text-zinc-400">预览</span>
-                </div>
-              </div>
-            </div>
+        {/* Module: Expression */}
+        {(selectedNode as DialogueNode).expression !== undefined && (
+          <div className="border border-zinc-700 rounded bg-zinc-800/30 p-3 relative group">
+             <button onClick={() => removeAddon('expression')} className="absolute top-2 right-2 text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 className="w-3 h-3" /></button>
+             <div className="flex items-center gap-2 mb-2 text-indigo-400">
+                <Settings2 className="w-3 h-3" />
+                <span className="text-xs font-bold uppercase">表情 (Expression)</span>
+             </div>
+             <input 
+                type="text"
+                placeholder="e.g. neutral, happy, angry"
+                value={(selectedNode as DialogueNode).expression}
+                onChange={(e) => {
+                   startEditing(selectedNode.id);
+                   updateNode(selectedNode.id, { expression: e.target.value });
+                }}
+                onBlur={commitEditing}
+                className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-300"
+             />
           </div>
         )}
+
+        {/* Module: Placement */}
+        {(selectedNode as DialogueNode).placement !== undefined && (
+          <div className="border border-zinc-700 rounded bg-zinc-800/30 p-3 relative group">
+             <button onClick={() => removeAddon('placement')} className="absolute top-2 right-2 text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 className="w-3 h-3" /></button>
+             <div className="flex items-center gap-2 mb-2 text-indigo-400">
+                <LayoutTemplate className="w-3 h-3" />
+                <span className="text-xs font-bold uppercase">站位 (Placement)</span>
+             </div>
+             <div className="flex gap-1 bg-zinc-900 p-1 rounded border border-zinc-700">
+                {(['left', 'center', 'right'] as const).map(p => (
+                   <button 
+                     key={p}
+                     onClick={() => {
+                        startEditing(selectedNode.id);
+                        updateNode(selectedNode.id, { placement: p });
+                        commitEditing();
+                     }}
+                     className={`flex-1 py-1 text-[10px] rounded uppercase transition-colors ${
+                       (selectedNode as DialogueNode).placement === p 
+                       ? 'bg-zinc-700 text-white font-bold' 
+                       : 'text-zinc-500 hover:text-zinc-300'
+                     }`}
+                   >
+                     {p}
+                   </button>
+                ))}
+             </div>
+          </div>
+        )}
+
+        {/* Module: BGM */}
+        {(selectedNode as LocationNode).bgm !== undefined && (
+          <div className="border border-zinc-700 rounded bg-zinc-800/30 p-3 relative group">
+             <button onClick={() => removeAddon('bgm')} className="absolute top-2 right-2 text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 className="w-3 h-3" /></button>
+             <div className="flex items-center gap-2 mb-2 text-pink-400">
+                <Music className="w-3 h-3" />
+                <span className="text-xs font-bold uppercase">背景音乐</span>
+             </div>
+             <input 
+                type="text"
+                placeholder="Audio ID..."
+                value={(selectedNode as LocationNode).bgm}
+                onChange={(e) => {
+                   startEditing(selectedNode.id);
+                   updateNode(selectedNode.id, { bgm: e.target.value });
+                }}
+                onBlur={commitEditing}
+                className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-300"
+             />
+          </div>
+        )}
+
+        {/* Module: Hotspots */}
+        {(selectedNode as LocationNode).hotspots !== undefined && (
+           <div className="border border-zinc-700 rounded bg-zinc-800/30 p-3 relative group">
+              <button onClick={() => removeAddon('hotspots')} className="absolute top-2 right-2 text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 className="w-3 h-3" /></button>
+              <div className="flex items-center gap-2 mb-2 text-amber-400">
+                <MousePointer2 className="w-3 h-3" />
+                <span className="text-xs font-bold uppercase">热区交互</span>
+              </div>
+              <div className="text-xs text-zinc-500 italic text-center py-2 border border-dashed border-zinc-700 rounded">
+                 在画布上绘制热区 (TBD)
+              </div>
+           </div>
+        )}
+
+        {/* Module: Filter */}
+        {(selectedNode as LocationNode).filter !== undefined && (
+          <div className="border border-zinc-700 rounded bg-zinc-800/30 p-3 relative group">
+             <button onClick={() => removeAddon('filter')} className="absolute top-2 right-2 text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 className="w-3 h-3" /></button>
+             <div className="flex items-center gap-2 mb-2 text-teal-400">
+                <Settings2 className="w-3 h-3" />
+                <span className="text-xs font-bold uppercase">视觉滤镜 (Filter)</span>
+             </div>
+             <input 
+                type="text"
+                placeholder="CSS filter e.g. grayscale(100%)"
+                value={(selectedNode as LocationNode).filter}
+                onChange={(e) => {
+                   startEditing(selectedNode.id);
+                   updateNode(selectedNode.id, { filter: e.target.value });
+                }}
+                onBlur={commitEditing}
+                className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-300 font-mono"
+             />
+          </div>
+        )}
+        
+        {/* Module: Default Next Node (Else Path for Branch) */}
+        {(selectedNode as BranchNode).defaultNextNodeId !== undefined && (
+           <div className="border border-zinc-700 rounded bg-zinc-800/30 p-3 relative group">
+              <button onClick={() => removeAddon('defaultNextNodeId')} className="absolute top-2 right-2 text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 className="w-3 h-3" /></button>
+              <div className="flex items-center gap-2 mb-2 text-amber-400">
+                <Split className="w-3 h-3" />
+                <span className="text-xs font-bold uppercase">默认路径 (Else)</span>
+              </div>
+              <div className="text-[10px] text-zinc-500 mb-1">当所有条件都不满足时：</div>
+              <div className="text-xs text-zinc-400 p-1 bg-zinc-900 rounded border border-zinc-800">
+                 从画布连接点连接目标...
+              </div>
+           </div>
+        )}
+
+        {/* Module: Advanced Mode (Variable) */}
+        {(selectedNode as VariableSetterNode).isAdvanced && (
+           <div className="border border-zinc-700 rounded bg-zinc-800/30 p-3 relative group">
+              <button onClick={() => removeAddon('isAdvanced')} className="absolute top-2 right-2 text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 className="w-3 h-3" /></button>
+              <div className="flex items-center gap-2 mb-2 text-purple-400">
+                <Code className="w-3 h-3" />
+                <span className="text-xs font-bold uppercase">高级表达式</span>
+              </div>
+              <textarea 
+                rows={3}
+                placeholder="e.g. coin = coin + (level * 10)"
+                value={(selectedNode as VariableSetterNode).value}
+                onChange={(e) => {
+                   startEditing(selectedNode.id);
+                   updateNode(selectedNode.id, { value: e.target.value });
+                }}
+                onBlur={commitEditing}
+                className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-300 font-mono resize-none focus:outline-none focus:border-purple-500"
+              />
+           </div>
+        )}
+
       </div>
+
+      {/* 4. FOOTER: Add Property Button */}
+      {availableAddons.length > 0 && (
+        <div className="p-4 border-t border-zinc-800 relative">
+          {!showAddonMenu ? (
+            <button 
+              onClick={() => setShowAddonMenu(true)}
+              className="w-full py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-xs font-semibold rounded border border-dashed border-zinc-700 hover:border-zinc-500 flex items-center justify-center gap-2 transition-all"
+            >
+              <Plus className="w-3 h-3" /> 添加属性 (Add Property)
+            </button>
+          ) : (
+            <div className="bg-zinc-800 rounded-lg shadow-xl border border-zinc-700 overflow-hidden animate-in slide-in-from-bottom-2 fade-in duration-200">
+               <div className="p-2 border-b border-zinc-700 flex justify-between items-center bg-zinc-900/50">
+                  <span className="text-[10px] font-bold text-zinc-500 uppercase">可用模块</span>
+                  <button onClick={() => setShowAddonMenu(false)} className="text-zinc-500 hover:text-white"><Plus className="w-3 h-3 rotate-45" /></button>
+               </div>
+               <div className="max-h-40 overflow-y-auto">
+                 {availableAddons.map((addon) => (
+                    <button
+                      key={addon.key}
+                      onClick={() => enableAddon(addon.key, addon.defaultValue)}
+                      className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-700 flex items-center gap-2 transition-colors"
+                    >
+                      <div className="text-zinc-500">{addon.icon}</div>
+                      {addon.label}
+                    </button>
+                 ))}
+               </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

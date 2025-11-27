@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { MousePointer2, Type, Image as ImageIcon, ZoomIn, ZoomOut, GitGraph, Variable, ArrowRightCircle } from 'lucide-react';
+import { MousePointer2, Type, Image as ImageIcon, ZoomIn, ZoomOut, GitGraph, Variable, ArrowRightCircle, ChevronDown, Layers } from 'lucide-react';
 import { NodeType, NarrativeNode, Vector2, DialogueNode, BranchNode, VariableSetterNode, JumpNode } from '../types';
 import { useEditorStore } from '../store/useEditorStore';
 
@@ -42,6 +42,9 @@ const Canvas: React.FC = () => {
     startPos: Vector2;
     mousePos: Vector2;
   } | null>(null);
+  
+  // HUD State
+  const [showLogicMenu, setShowLogicMenu] = useState(false);
 
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
@@ -178,6 +181,8 @@ const Canvas: React.FC = () => {
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
+    // Only handle mouse down if it's strictly on the background (not stopped by HUD)
+    // The HUD elements have e.stopPropagation() so they won't trigger this.
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
       setIsPanning(true);
       setPanStart({ x: e.clientX, y: e.clientY });
@@ -186,6 +191,8 @@ const Canvas: React.FC = () => {
     } else if (e.target === containerRef.current) {
         clearSelection();
     }
+    // Close menu if clicking canvas
+    setShowLogicMenu(false);
   };
 
   const getCanvasMousePos = (clientX: number, clientY: number) => {
@@ -217,6 +224,7 @@ const Canvas: React.FC = () => {
     // Update BOTH React State and Ref immediately
     setDragState(newDragState);
     stateRef.current.dragState = newDragState;
+    setShowLogicMenu(false);
   };
 
   const handleHandleMouseDown = (e: React.MouseEvent, nodeId: string, handleId?: string) => {
@@ -236,6 +244,7 @@ const Canvas: React.FC = () => {
      // Update BOTH React State and Ref immediately to prevent input lag
      setLinkingState(newLinkingState);
      stateRef.current.linkingState = newLinkingState;
+     setShowLogicMenu(false);
   };
 
   const handleInputMouseUp = (e: React.MouseEvent, targetNodeId: string) => {
@@ -255,6 +264,7 @@ const Canvas: React.FC = () => {
   const handleEdgeClick = (e: React.MouseEvent, edgeId: string) => {
       e.stopPropagation();
       selectNode(edgeId, e.shiftKey);
+      setShowLogicMenu(false);
   };
 
   // --- Drag and Drop Creation ---
@@ -276,6 +286,8 @@ const Canvas: React.FC = () => {
   const onDragStart = (e: React.DragEvent, type: NodeType) => {
     e.dataTransfer.setData('nodeType', type);
     e.dataTransfer.effectAllowed = 'copy';
+    // Optional: Hide menu after drag starts
+    // setShowLogicMenu(false); 
   };
 
   const handleAddNode = (type: NodeType) => {
@@ -287,6 +299,7 @@ const Canvas: React.FC = () => {
     const centerY = (viewportHeight / 2 - canvasTransform.y) / canvasTransform.scale;
     
     addNode(type, { x: centerX - 150, y: centerY - 100 });
+    setShowLogicMenu(false);
   };
 
   // --- Rendering Helpers ---
@@ -308,34 +321,49 @@ const Canvas: React.FC = () => {
         
         // Match CSS visual alignment: 
         // Bottom-up calculation to match mt-auto
-        // padding-bottom: 12px (p-3)
-        // item height: 24px (h-6)
-        // gap: 4px (gap-1)
+        // padding-bottom: 12px (p-[12px])
+        // item height: 24px (h-[24px])
+        // gap: 4px (gap-[4px])
         const reverseIndex = choices.length - 1 - choiceIndex;
-        const offsetFromBottom = 12 + (reverseIndex * 28) + 12; // 28 = 24 + 4
+        // offset from bottom = padding + (index from bottom * (height + gap)) + half height
+        const offsetFromBottom = 12 + (reverseIndex * (24 + 4)) + 12;
         
+        // Correction: The handle is visually positioned at size.x - 2px (center).
         return { 
-            x: node.position.x + node.size.x, 
+            x: node.position.x + node.size.x - 2, 
             y: node.position.y + node.size.y - offsetFromBottom
         };
       }
 
       // 2. Branch Node Conditions
-      if (node.type === NodeType.BRANCH && handleId) {
+      if (node.type === NodeType.BRANCH) {
         const conditions = (node as BranchNode).conditions || [];
-        const index = conditions.findIndex(c => c.id === handleId);
-        if (index === -1) return { x: node.position.x + node.size.x, y: node.position.y };
+        const labelOffset = 24; // text-[10px] leading-4 (16px) + mb-2 (8px) = 24px
+        const headerOffset = 24 + 12 + labelOffset; // Title (24) + Padding (12) + Label (24) = 60
+        const itemHeight = 24;
+        const gap = 8; // space-y-2
         
-        // Top-down calculation to match layout
-        // Header height ~ 24px
-        // Padding top 12px
-        // Item height 24px + gap 8px (space-y-2)
-        const offsetFromTop = 24 + 12 + (index * 32) + 12; 
-        
-        return {
-          x: node.position.x + node.size.x,
-          y: node.position.y + offsetFromTop
-        };
+        if (handleId) {
+            const index = conditions.findIndex(c => c.id === handleId);
+            if (index !== -1) {
+                // Top-down calculation
+                const offsetFromTop = headerOffset + (index * (itemHeight + gap)) + (itemHeight / 2);
+                return {
+                    x: node.position.x + node.size.x - 2,
+                    y: node.position.y + offsetFromTop
+                };
+            }
+        } else {
+             // Else handle (handleId is undefined for Branch default path)
+             // Positioned after all conditions
+             const listHeight = conditions.length * (itemHeight + gap);
+             const elseMargin = 8; // mt-2
+             const offsetFromTop = headerOffset + listHeight + elseMargin + (itemHeight / 2);
+             return {
+                x: node.position.x + node.size.x - 2,
+                y: node.position.y + offsetFromTop
+             };
+        }
       }
 
       // Default Single Output
@@ -355,9 +383,10 @@ const Canvas: React.FC = () => {
             <div className="italic opacity-80 line-clamp-3 mb-2 flex-1 min-h-0">
               "{(node as DialogueNode).text}"
             </div>
-            <div className="flex flex-col gap-1 mt-auto shrink-0">
+            {/* Using explicit pixel gap to ensure math alignment matches CSS visual */}
+            <div className="flex flex-col gap-[4px] mt-auto shrink-0">
               {(node as DialogueNode).choices?.map((c) => (
-                <div key={c.id} className="relative flex items-center justify-end h-6 shrink-0 group/choice">
+                <div key={c.id} className="relative flex items-center justify-end h-[24px] shrink-0 group/choice">
                     <div className="bg-black/20 px-2 py-1 rounded text-[10px] text-indigo-300 border border-indigo-500/20 w-full text-right truncate h-full flex items-center justify-end">
                       {c.text}
                     </div>
@@ -389,11 +418,11 @@ const Canvas: React.FC = () => {
       case NodeType.BRANCH:
         return (
           <div className="flex flex-col h-full">
-            <div className="text-[10px] text-zinc-500 mb-2 italic">Evaluation Order:</div>
+            <div className="text-[10px] text-zinc-500 mb-2 italic leading-4 h-4">Evaluation Order:</div>
             <div className="flex flex-col space-y-2">
               {(node as BranchNode).conditions?.map((c, idx) => (
                 <div key={c.id} className="relative flex items-center h-6 shrink-0">
-                  <div className="bg-black/20 px-2 rounded text-[10px] text-amber-300 border border-amber-500/20 w-full truncate font-mono">
+                  <div className="bg-black/20 px-2 rounded text-[10px] text-amber-300 border border-amber-500/20 w-full truncate font-mono h-full flex items-center">
                     {idx + 1}. {c.expression}
                   </div>
                   {/* Output Handle for Condition */}
@@ -404,10 +433,21 @@ const Canvas: React.FC = () => {
                 </div>
               ))}
               {(!(node as BranchNode).conditions?.length) && (
-                <div className="text-xs text-zinc-600 text-center">No conditions</div>
+                <div className="text-xs text-zinc-600 text-center py-1">No conditions</div>
               )}
             </div>
-             {/* Default Exit (Optional, could be added as a static handle at bottom) */}
+             
+            {/* Explicit Else Block */}
+            <div className="relative flex items-center h-6 shrink-0 mt-2">
+                <div className="bg-white/5 px-2 rounded text-[10px] text-zinc-500 border border-zinc-700/50 w-full truncate font-mono italic h-full flex items-center">
+                    else
+                </div>
+                {/* Output Handle for Else (Default) */}
+                <div 
+                    className="absolute -right-[18px] top-1/2 -translate-y-1/2 w-3 h-3 bg-zinc-500 border border-zinc-900 rounded-full hover:scale-125 transition-transform cursor-crosshair z-20"
+                    onMouseDown={(e) => handleHandleMouseDown(e, node.id, undefined)} 
+                />
+            </div>
           </div>
         );
 
@@ -540,7 +580,17 @@ const Canvas: React.FC = () => {
         </svg>
 
         {/* Nodes Layer */}
-        {nodes.map(node => (
+        {nodes.map(node => {
+          // Determine if we should show the default output handle
+          // For Dialogue nodes: Only if NO choices exist
+          const isDialogue = node.type === NodeType.DIALOGUE;
+          const isBranch = node.type === NodeType.BRANCH;
+          const hasChoices = isDialogue && (node as DialogueNode).choices && (node as DialogueNode).choices.length > 0;
+          
+          // Branch nodes never show default centered handle (they have specific Else handle)
+          const showDefaultHandle = !isBranch && (!isDialogue || !hasChoices);
+          
+          return (
           <div
             key={node.id}
             onMouseDown={(e) => handleNodeMouseDown(e, node)}
@@ -563,82 +613,120 @@ const Canvas: React.FC = () => {
                 onMouseUp={(e) => handleInputMouseUp(e, node.id)}
             />
 
-            {/* Default Output Handle (Right) - Only for types without specific list outputs */}
-            {node.type !== NodeType.DIALOGUE && node.type !== NodeType.BRANCH && (
-               <div 
+            {/* Default Output Handle (Right - Center) */}
+            {showDefaultHandle && (
+              <div 
                 className="absolute right-0 top-1/2 translate-x-1/2 -translate-y-1/2 w-4 h-4 bg-zinc-600 border border-zinc-900 rounded-full hover:bg-indigo-500 z-20 cursor-crosshair transition-transform hover:scale-125" 
                 onMouseDown={(e) => handleHandleMouseDown(e, node.id)}
-               />
+              />
             )}
 
             {/* Node Header */}
-            <div className={`h-6 px-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider shrink-0 ${getNodeColorClass(node.type)}`}>
+            <div className={`h-[24px] px-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider shrink-0 ${getNodeColorClass(node.type)}`}>
               {getNodeIcon(node.type)}
               <span className="truncate flex-1">{node.name}</span>
             </div>
 
             {/* Node Content */}
-            <div className="p-3 text-zinc-300 text-xs flex-1 overflow-hidden relative flex flex-col">
+            {/* Using explicit pixel padding to match geometry math: p-[12px] */}
+            <div className="p-[12px] text-zinc-300 text-xs flex-1 overflow-hidden relative flex flex-col">
                {renderNodeContent(node)}
             </div>
           </div>
-        ))}
+        )})}
       </div>
 
-      {/* Toolbar HUD */}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-zinc-800 rounded-lg shadow-xl border border-zinc-700 flex items-center p-1 gap-1 z-30">
-        <button className="p-2 hover:bg-zinc-700 rounded text-white" title="选择 (V)"><MousePointer2 className="w-4 h-4" /></button>
+      {/* Toolbar HUD - Grouped with Dropdown */}
+      <div 
+        className="absolute top-4 left-1/2 -translate-x-1/2 bg-zinc-800 rounded-lg shadow-xl border border-zinc-700 flex items-center p-1 gap-1 z-30 select-none"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        {/* Selection Tool */}
+        <button 
+          className="p-2 hover:bg-zinc-700 rounded text-white" 
+          title="选择 (V)"
+          onClick={() => clearSelection()}
+        >
+          <MousePointer2 className="w-4 h-4" />
+        </button>
+        
         <div className="w-px h-4 bg-zinc-700 mx-1"></div>
         
+        {/* Narrative Group */}
         <button 
           draggable
           onDragStart={(e) => onDragStart(e, NodeType.DIALOGUE)}
-          className="p-2 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white cursor-grab active:cursor-grabbing" 
-          title="对话"
+          className="p-2 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white cursor-grab active:cursor-grabbing flex items-center gap-1" 
+          title="对话 (Drag to create)"
           onClick={() => handleAddNode(NodeType.DIALOGUE)}
         >
           <Type className="w-4 h-4" />
+          <span className="text-[10px] font-semibold hidden sm:inline"></span>
         </button>
         <button 
           draggable
           onDragStart={(e) => onDragStart(e, NodeType.LOCATION)}
-          className="p-2 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white cursor-grab active:cursor-grabbing"
-          title="场景"
+          className="p-2 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white cursor-grab active:cursor-grabbing flex items-center gap-1"
+          title="场景 (Drag to create)"
           onClick={() => handleAddNode(NodeType.LOCATION)}
         >
           <ImageIcon className="w-4 h-4" />
+          <span className="text-[10px] font-semibold hidden sm:inline"></span>
         </button>
-         <button 
-          draggable
-          onDragStart={(e) => onDragStart(e, NodeType.BRANCH)}
-          className="p-2 hover:bg-zinc-700 rounded text-zinc-400 hover:text-amber-400 cursor-grab active:cursor-grabbing"
-          title="逻辑分支"
-          onClick={() => handleAddNode(NodeType.BRANCH)}
-        >
-          <GitGraph className="w-4 h-4" />
-        </button>
-         <button 
-          draggable
-          onDragStart={(e) => onDragStart(e, NodeType.SET_VARIABLE)}
-          className="p-2 hover:bg-zinc-700 rounded text-zinc-400 hover:text-purple-400 cursor-grab active:cursor-grabbing"
-          title="设置变量"
-          onClick={() => handleAddNode(NodeType.SET_VARIABLE)}
-        >
-          <Variable className="w-4 h-4" />
-        </button>
-        <button 
-          draggable
-          onDragStart={(e) => onDragStart(e, NodeType.JUMP)}
-          className="p-2 hover:bg-zinc-700 rounded text-zinc-400 hover:text-rose-400 cursor-grab active:cursor-grabbing"
-          title="跳转章节"
-          onClick={() => handleAddNode(NodeType.JUMP)}
-        >
-          <ArrowRightCircle className="w-4 h-4" />
-        </button>
+
+        <div className="w-px h-4 bg-zinc-700 mx-1"></div>
+
+        {/* Logic Group (Dropdown) */}
+        <div className="relative">
+          <button 
+            className={`p-2 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white flex items-center gap-1 ${showLogicMenu ? 'bg-zinc-700 text-white' : ''}`}
+            onClick={() => setShowLogicMenu(!showLogicMenu)}
+            title="高级逻辑"
+          >
+            <Layers className="w-4 h-4" />
+            <span className="text-[10px] font-semibold hidden sm:inline"></span>
+            <ChevronDown className="w-3 h-3 ml-0.5 opacity-50" />
+          </button>
+
+          {showLogicMenu && (
+            <div className="absolute top-full left-0 mt-2 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl p-1 flex flex-col gap-1 min-w-[120px]">
+               <button 
+                draggable
+                onDragStart={(e) => onDragStart(e, NodeType.BRANCH)}
+                className="flex items-center gap-2 p-2 hover:bg-zinc-700 rounded text-zinc-300 hover:text-amber-400 text-left w-full cursor-grab active:cursor-grabbing"
+                onClick={() => handleAddNode(NodeType.BRANCH)}
+              >
+                <GitGraph className="w-4 h-4" />
+                <span className="text-xs">分支判断</span>
+              </button>
+               <button 
+                draggable
+                onDragStart={(e) => onDragStart(e, NodeType.SET_VARIABLE)}
+                className="flex items-center gap-2 p-2 hover:bg-zinc-700 rounded text-zinc-300 hover:text-purple-400 text-left w-full cursor-grab active:cursor-grabbing"
+                onClick={() => handleAddNode(NodeType.SET_VARIABLE)}
+              >
+                <Variable className="w-4 h-4" />
+                <span className="text-xs">变量设置</span>
+              </button>
+               <button 
+                draggable
+                onDragStart={(e) => onDragStart(e, NodeType.JUMP)}
+                className="flex items-center gap-2 p-2 hover:bg-zinc-700 rounded text-zinc-300 hover:text-rose-400 text-left w-full cursor-grab active:cursor-grabbing"
+                onClick={() => handleAddNode(NodeType.JUMP)}
+              >
+                <ArrowRightCircle className="w-4 h-4" />
+                <span className="text-xs">章节跳转</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Zoom Controls HUD */}
-      <div className="absolute bottom-4 left-4 flex flex-col gap-2 z-30">
+      <div 
+        className="absolute bottom-4 left-4 flex flex-col gap-2 z-30"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
          <div className="bg-zinc-800 rounded-md shadow-lg border border-zinc-700 flex flex-col p-1">
             <button 
               className="p-1.5 hover:bg-zinc-700 rounded text-zinc-400"
