@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { MousePointer2, Type, Image as ImageIcon, ZoomIn, ZoomOut, GitGraph, Variable, ArrowRightCircle, ChevronDown, Layers, Zap, Clapperboard, Timer, Smartphone, MessageSquare, Play } from 'lucide-react';
-import { NodeType, NarrativeNode, Vector2, DialogueNode, BranchNode, VariableSetterNode, JumpNode, LocationNode, ActionNode, Hotspot } from '../types';
+import { MousePointer2, Type, Image as ImageIcon, ZoomIn, ZoomOut, GitGraph, Variable, ArrowRightCircle, ChevronDown, Layers, Zap, Clapperboard, Timer, Smartphone, MessageSquare, Play, Package, Vote } from 'lucide-react';
+import { NodeType, NarrativeNode, Vector2, DialogueNode, BranchNode, VariableSetterNode, JumpNode, LocationNode, ActionNode, Hotspot, ScriptActionType, VoteNode } from '../types';
 import { useEditorStore } from '../store/useEditorStore';
 
 // Bezier Curve Helper
@@ -46,7 +46,6 @@ const NodeComponent: React.FC<NodeComponentProps> = React.memo(({
         
         const observer = new ResizeObserver(() => {
             // Wrap in requestAnimationFrame to avoid "ResizeObserver loop completed with undelivered notifications"
-            // This error occurs when the observation callback triggers a change that is observed in the same frame.
             window.requestAnimationFrame(() => {
                 const el = elementRef.current;
                 if (el) {
@@ -67,10 +66,13 @@ const NodeComponent: React.FC<NodeComponentProps> = React.memo(({
     const isDialogue = node.type === NodeType.DIALOGUE;
     const isBranch = node.type === NodeType.BRANCH;
     const isLocation = node.type === NodeType.LOCATION;
+    const isVote = node.type === NodeType.VOTE;
     const isStart = node.type === NodeType.START;
 
     const hasChoices = isDialogue && (node as DialogueNode).choices && (node as DialogueNode).choices.length > 0;
-    const showDefaultHandle = !isBranch && !isLocation && !hasChoices;
+    const hasVoteOptions = isVote && (node as VoteNode).voteConfig?.options?.length > 0;
+    
+    const showDefaultHandle = !isBranch && !isLocation && !hasChoices && !hasVoteOptions;
     const showInputHandle = !isStart; // Start node has no input
 
     return (
@@ -540,6 +542,16 @@ const Canvas: React.FC = () => {
                  const offsetFromBottom = BORDER + PADDING + (reverseIndex * (ITEM_HEIGHT + ITEM_GAP)) + (ITEM_HEIGHT / 2);
                  return { x: node.position.x + node.size.x - 2, y: node.position.y + node.size.y - offsetFromBottom };
             }
+            // VOTE NODE
+            if (node.type === NodeType.VOTE && handleId) {
+                const options = (node as VoteNode).voteConfig.options;
+                const optionIndex = options.findIndex(o => o.id === handleId);
+                if (optionIndex === -1) return { x: node.position.x + node.size.x, y: node.position.y };
+                const reverseIndex = options.length - 1 - optionIndex;
+                const offsetFromBottom = BORDER + PADDING + (reverseIndex * (ITEM_HEIGHT + ITEM_GAP)) + (ITEM_HEIGHT / 2);
+                return { x: node.position.x + node.size.x - 2, y: node.position.y + node.size.y - offsetFromBottom };
+            }
+
             return { x: node.position.x + node.size.x, y: node.position.y + node.size.y / 2 };
         }
      };
@@ -675,6 +687,20 @@ const Canvas: React.FC = () => {
          return { x: node.position.x + node.size.x - 2, y: node.position.y + node.size.y - offsetFromBottom };
       }
 
+      if (node.type === NodeType.VOTE && handleId) {
+        const options = (node as VoteNode).voteConfig.options;
+        const optionIndex = options.findIndex(o => o.id === handleId);
+        if (optionIndex === -1) return { x: node.position.x + node.size.x, y: node.position.y };
+        
+        const reverseIndex = options.length - 1 - optionIndex;
+        const offsetFromBottom = BORDER + PADDING + (reverseIndex * (ITEM_HEIGHT + ITEM_GAP)) + (ITEM_HEIGHT / 2);
+        
+        return { 
+            x: node.position.x + node.size.x - 2, 
+            y: node.position.y + node.size.y - offsetFromBottom
+        };
+      }
+
       return { x: node.position.x + node.size.x, y: node.position.y + node.size.y / 2 };
     }
   };
@@ -799,7 +825,7 @@ const Canvas: React.FC = () => {
             
             <div className="flex flex-col" style={{ gap: LAYOUT.BRANCH_GAP }}>
               {branchNode.conditions?.map((c, idx) => {
-                const varName = story.globalVariables.find(v => v.id === c.variableId)?.name || '???';
+                const varName = story.attributes.find(v => v.id === c.variableId)?.name || '???';
                 
                 return (
                   <div key={c.id} className="relative flex items-center shrink-0" style={{ height: ITEM_HEIGHT }}>
@@ -863,28 +889,68 @@ const Canvas: React.FC = () => {
 
       case NodeType.ACTION:
         const actionNode = node as ActionNode;
+        const actions = actionNode.actions || [];
         return (
           <div className="flex flex-col h-full overflow-hidden">
              <div className="flex-1 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
-                {actionNode.commands.map((cmd, idx) => {
+                {actions.map((cmd, idx) => {
                   let Icon = MessageSquare;
                   let Color = "text-zinc-400";
-                  if (cmd.type === 'playSound') { Icon = Zap; Color = "text-pink-400"; }
-                  if (cmd.type === 'wait') { Icon = Timer; Color = "text-blue-400"; }
-                  if (cmd.type === 'screenShake') { Icon = Smartphone; Color = "text-orange-400"; }
-                  if (cmd.type === 'showToast') { Icon = MessageSquare; Color = "text-green-400"; }
+                  if (cmd.type === ScriptActionType.PLAY_SOUND) { Icon = Zap; Color = "text-pink-400"; }
+                  else if (cmd.type === ScriptActionType.WAIT) { Icon = Timer; Color = "text-blue-400"; }
+                  else if (cmd.type === ScriptActionType.SCREEN_SHAKE) { Icon = Smartphone; Color = "text-orange-400"; }
+                  else if (cmd.type === ScriptActionType.SHOW_TOAST) { Icon = MessageSquare; Color = "text-green-400"; }
+                  else if (cmd.type === ScriptActionType.UPDATE_ATTRIBUTE) { Icon = Variable; Color = "text-purple-400"; }
+                  else if (cmd.type === ScriptActionType.ADD_ITEM || cmd.type === ScriptActionType.REMOVE_ITEM) { Icon = Package; Color = "text-amber-400"; }
                   
+                  // Try to get attribute name if available
+                  let extraText = "";
+                  if (cmd.type === ScriptActionType.UPDATE_ATTRIBUTE && cmd.params.attributeId) {
+                      const attrName = story.attributes.find(a => a.id === cmd.params.attributeId)?.name;
+                      if(attrName) extraText = ` (${attrName})`;
+                  }
+
                   return (
                     <div key={cmd.id} className="flex items-center gap-2 bg-black/20 p-1.5 rounded border border-zinc-700/50 text-[10px]">
                        <span className="text-zinc-600 font-mono w-4 text-center">{idx + 1}</span>
                        <Icon className={`w-3 h-3 ${Color}`} />
-                       <span className="truncate text-zinc-300 font-mono">{cmd.type}</span>
+                       <span className="truncate text-zinc-300 font-mono">{cmd.type}{extraText}</span>
                     </div>
                   );
                 })}
-                {actionNode.commands.length === 0 && (
+                {actions.length === 0 && (
                    <div className="text-center text-zinc-600 italic text-[10px] mt-4">Empty Sequence</div>
                 )}
+             </div>
+          </div>
+        );
+
+      case NodeType.VOTE:
+        const voteNode = node as VoteNode;
+        const config = voteNode.voteConfig || { title: 'Vote', duration: 30, options: [] };
+        return (
+          <div className="flex flex-col h-full">
+             <div className="font-bold text-violet-400 mb-1 shrink-0 flex items-center justify-between">
+                <span>{config.title}</span>
+                <div className="flex items-center gap-1 text-[9px] bg-violet-900/30 px-1.5 py-0.5 rounded border border-violet-500/30">
+                    <Timer className="w-2.5 h-2.5" />
+                    {config.duration}s
+                </div>
+             </div>
+             
+             <div className="flex flex-col mt-auto shrink-0" style={{ gap: ITEM_GAP }}>
+                {config.options.map(opt => (
+                    <div key={opt.id} className="relative flex items-center justify-end shrink-0 group/choice" style={{ height: ITEM_HEIGHT }}>
+                        <div className="bg-black/20 px-2 py-1 rounded text-[10px] text-violet-200 border border-violet-500/20 w-full text-right truncate h-full flex items-center justify-between">
+                            {opt.isCorrect && <span className="text-[8px] text-green-400 font-bold bg-green-900/20 px-1 rounded">CORRECT</span>}
+                            <span>{opt.text}</span>
+                        </div>
+                        <div 
+                          className="absolute -right-[18px] top-1/2 -translate-y-1/2 w-3 h-3 bg-violet-600 border border-zinc-900 rounded-full hover:scale-125 transition-transform cursor-crosshair z-20"
+                          onMouseDown={(e) => handleHandleMouseDown(e, node.id, opt.id)}
+                        />
+                    </div>
+                ))}
              </div>
           </div>
         );
@@ -902,6 +968,7 @@ const Canvas: React.FC = () => {
       case NodeType.SET_VARIABLE: return 'bg-purple-900/50 text-purple-400';
       case NodeType.JUMP: return 'bg-rose-900/50 text-rose-400';
       case NodeType.ACTION: return 'bg-slate-900/80 text-cyan-400';
+      case NodeType.VOTE: return 'bg-violet-900/80 text-violet-300';
       default: return 'bg-indigo-900/50 text-indigo-400';
     }
   }, []);
@@ -914,6 +981,7 @@ const Canvas: React.FC = () => {
       case NodeType.SET_VARIABLE: return <Variable className="w-3 h-3" />;
       case NodeType.JUMP: return <ArrowRightCircle className="w-3 h-3" />;
       case NodeType.ACTION: return <Clapperboard className="w-3 h-3" />;
+      case NodeType.VOTE: return <Vote className="w-3 h-3" />;
       default: return <Type className="w-3 h-3" />;
     }
   }, []);
@@ -1095,6 +1163,15 @@ const Canvas: React.FC = () => {
               >
                 <ArrowRightCircle className="w-4 h-4" />
                 <span className="text-xs">章节跳转</span>
+              </button>
+              <button 
+                draggable
+                onDragStart={(e) => onDragStart(e, NodeType.VOTE)}
+                className="flex items-center gap-2 p-2 hover:bg-zinc-700 rounded text-zinc-300 hover:text-violet-400 text-left w-full cursor-grab active:cursor-grabbing"
+                onClick={() => handleAddNode(NodeType.VOTE)}
+              >
+                <Vote className="w-4 h-4" />
+                <span className="text-xs">投票 (Vote)</span>
               </button>
             </div>
           )}

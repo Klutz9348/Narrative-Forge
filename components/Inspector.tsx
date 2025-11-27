@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
-import { MousePointer2, MoreVertical, Wand2, Plus, Trash2, ArrowRightCircle, Mic, Music, LayoutTemplate, Settings2, Code, Split, Zap, PlayCircle, StopCircle, Target, Clapperboard, Timer, Smartphone, MessageSquare, ImageIcon, Play } from 'lucide-react';
-import { NodeType, DialogueNode, BranchNode, VariableSetterNode, JumpNode, LocationNode, NodeEvent, Hotspot, ActionNode, ActionCommandType, LogicOperator, VariableType } from '../types';
+import { MousePointer2, MoreVertical, Wand2, Plus, Trash2, ArrowRightCircle, Mic, Music, LayoutTemplate, Settings2, Code, Split, Zap, PlayCircle, StopCircle, Target, Clapperboard, Timer, Smartphone, MessageSquare, ImageIcon, Play, Gauge, Package, MinusCircle, ChevronDown, ChevronRight, Vote, Search, Share2, ShoppingCart } from 'lucide-react';
+import { NodeType, DialogueNode, BranchNode, VariableSetterNode, JumpNode, LocationNode, NodeEvent, Hotspot, ActionNode, ScriptActionType, ScriptAction, LogicOperator, VariableType, VoteNode } from '../types';
 import * as GeminiService from '../services/geminiService';
 import { useEditorStore } from '../store/useEditorStore';
 
@@ -13,6 +13,7 @@ const NODE_TYPE_LABELS: Record<NodeType, string> = {
   [NodeType.JUMP]: '章节跳转 (Jump)',
   [NodeType.SET_VARIABLE]: '设置变量 (Set Var)',
   [NodeType.ACTION]: '动作序列 (Action Script)',
+  [NodeType.VOTE]: '投票 (Vote)',
 };
 
 // Definition of available add-ons per node type
@@ -34,40 +35,268 @@ const ADDON_DEFINITIONS: Record<NodeType, { key: string; label: string; icon: Re
     { key: 'isAdvanced', label: '高级模式 (Advanced)', icon: <Code className="w-3 h-3"/>, defaultValue: true }
   ],
   [NodeType.JUMP]: [],
-  [NodeType.ACTION]: []
+  [NodeType.ACTION]: [],
+  [NodeType.VOTE]: []
 };
 
-// Command Definitions for Action Node
-const ACTION_COMMANDS: Record<ActionCommandType, { label: string; icon: React.ReactNode; params: { key: string; label: string; type: 'text' | 'number' }[] }> = {
-  playSound: { 
-    label: '播放音效', 
-    icon: <Zap className="w-3 h-3" />,
-    params: [{ key: 'audioId', label: 'Audio ID / URL', type: 'text' }] 
-  },
-  wait: { 
-    label: '等待 (Wait)', 
-    icon: <Timer className="w-3 h-3" />,
-    params: [{ key: 'duration', label: 'Duration (sec)', type: 'number' }] 
-  },
-  screenShake: { 
-    label: '屏幕震动', 
-    icon: <Smartphone className="w-3 h-3" />,
-    params: [
-      { key: 'intensity', label: 'Intensity (1-10)', type: 'number' },
-      { key: 'duration', label: 'Duration (sec)', type: 'number' }
-    ] 
-  },
-  showToast: { 
-    label: '显示提示', 
-    icon: <MessageSquare className="w-3 h-3" />,
-    params: [{ key: 'message', label: 'Message', type: 'text' }] 
-  }
+// Action Definitions for Script Actions
+const SCRIPT_ACTIONS: Record<ScriptActionType, { label: string; icon: React.ReactNode; color: string }> = {
+  [ScriptActionType.UPDATE_ATTRIBUTE]: { label: '修改属性 (Attr)', icon: <Gauge className="w-3 h-3" />, color: 'text-purple-400' },
+  [ScriptActionType.ADD_ITEM]: { label: '添加物品 (Add Item)', icon: <Package className="w-3 h-3" />, color: 'text-amber-400' },
+  [ScriptActionType.REMOVE_ITEM]: { label: '移除物品 (Remove Item)', icon: <MinusCircle className="w-3 h-3" />, color: 'text-red-400' },
+  [ScriptActionType.PLAY_SOUND]: { label: '播放音效 (Sound)', icon: <Zap className="w-3 h-3" />, color: 'text-pink-400' },
+  [ScriptActionType.WAIT]: { label: '等待 (Wait)', icon: <Timer className="w-3 h-3" />, color: 'text-blue-400' },
+  [ScriptActionType.SCREEN_SHAKE]: { label: '屏幕震动 (Shake)', icon: <Smartphone className="w-3 h-3" />, color: 'text-orange-400' },
+  [ScriptActionType.SHOW_TOAST]: { label: '显示提示 (Toast)', icon: <MessageSquare className="w-3 h-3" />, color: 'text-green-400' },
+  // Phase 3 Actions
+  [ScriptActionType.ADD_CLUE]: { label: '获得线索 (Get Clue)', icon: <Search className="w-3 h-3" />, color: 'text-cyan-400' },
+  [ScriptActionType.REMOVE_CLUE]: { label: '失去线索 (Lost Clue)', icon: <Search className="w-3 h-3" />, color: 'text-zinc-400' },
+  [ScriptActionType.SHARE_CLUE]: { label: '分享线索 (Share)', icon: <Share2 className="w-3 h-3" />, color: 'text-indigo-400' },
+  // Phase 4 Actions
+  [ScriptActionType.OPEN_SHOP]: { label: '打开商店 (Open Shop)', icon: <ShoppingCart className="w-3 h-3" />, color: 'text-emerald-400' },
+  [ScriptActionType.OPEN_CRAFTING]: { label: '打开合成 (Open Crafting)', icon: <Package className="w-3 h-3" />, color: 'text-amber-500' },
 };
 
 const OPERATORS_BY_TYPE: Record<VariableType, LogicOperator[]> = {
   'boolean': ['==', '!='],
   'number': ['==', '!=', '>', '>=', '<', '<='],
   'string': ['==', '!=', 'contains']
+};
+
+// --- Reusable Action Stack Editor ---
+const ActionStackEditor: React.FC<{
+  actions: ScriptAction[];
+  onChange: (actions: ScriptAction[]) => void;
+  onBlur: () => void;
+}> = ({ actions, onChange, onBlur }) => {
+  const { story } = useEditorStore();
+  const [showMenu, setShowMenu] = useState(false);
+
+  const addAction = (type: ScriptActionType) => {
+    const newAction: ScriptAction = {
+      id: `act_${Date.now()}`,
+      type,
+      params: {}
+    };
+    onChange([...actions, newAction]);
+    onBlur(); // Commit
+    setShowMenu(false);
+  };
+
+  const removeAction = (id: string) => {
+    onChange(actions.filter(a => a.id !== id));
+    onBlur();
+  };
+
+  const updateActionParam = (id: string, key: string, value: any) => {
+    onChange(actions.map(a => a.id === id ? { ...a, params: { ...a.params, [key]: value } } : a));
+  };
+
+  return (
+    <div className="space-y-2">
+      {actions.map((action, idx) => {
+        const def = SCRIPT_ACTIONS[action.type];
+        return (
+          <div key={action.id} className="bg-zinc-800/80 border border-zinc-700/50 rounded p-2 text-xs relative group">
+             {/* Header */}
+             <div className="flex items-center gap-2 mb-2">
+               <span className="font-mono text-zinc-600 w-4 text-center">{idx + 1}</span>
+               <div className={`${def.color}`}>{def.icon}</div>
+               <span className="font-bold text-zinc-300">{def.label}</span>
+               <button onClick={() => removeAction(action.id)} className="absolute top-2 right-2 text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                 <Trash2 className="w-3 h-3" />
+               </button>
+             </div>
+
+             {/* Dynamic Params Form */}
+             <div className="pl-6 space-y-2">
+                {action.type === ScriptActionType.UPDATE_ATTRIBUTE && (
+                  <div className="grid grid-cols-1 gap-1">
+                     <select 
+                        className="bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300"
+                        value={action.params.attributeId || ''}
+                        onChange={(e) => updateActionParam(action.id, 'attributeId', e.target.value)}
+                        onBlur={onBlur}
+                     >
+                        <option value="">-- 选择属性 --</option>
+                        {story.attributes.map(attr => <option key={attr.id} value={attr.id}>{attr.name}</option>)}
+                     </select>
+                     <div className="flex gap-1">
+                        <select 
+                          className="w-16 bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300"
+                          value={action.params.op || 'set'}
+                          onChange={(e) => updateActionParam(action.id, 'op', e.target.value)}
+                          onBlur={onBlur}
+                        >
+                          <option value="set">=</option>
+                          <option value="add">+</option>
+                          <option value="sub">-</option>
+                        </select>
+                        <input 
+                          type="number" 
+                          placeholder="Value"
+                          className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300"
+                          value={action.params.value || ''}
+                          onChange={(e) => updateActionParam(action.id, 'value', parseFloat(e.target.value))}
+                          onBlur={onBlur}
+                        />
+                     </div>
+                  </div>
+                )}
+
+                {(action.type === ScriptActionType.ADD_ITEM || action.type === ScriptActionType.REMOVE_ITEM) && (
+                   <div className="flex gap-1">
+                      <select 
+                        className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300"
+                        value={action.params.itemId || ''}
+                        onChange={(e) => updateActionParam(action.id, 'itemId', e.target.value)}
+                        onBlur={onBlur}
+                      >
+                        <option value="">-- 选择物品 --</option>
+                        {story.items.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+                      </select>
+                      <input 
+                        type="number"
+                        className="w-12 bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-center text-zinc-300"
+                        placeholder="Qty"
+                        defaultValue={1}
+                        value={action.params.count || 1}
+                        onChange={(e) => updateActionParam(action.id, 'count', parseFloat(e.target.value))}
+                        onBlur={onBlur}
+                      />
+                   </div>
+                )}
+
+                {/* CLUE ACTIONS */}
+                {(action.type === ScriptActionType.ADD_CLUE || action.type === ScriptActionType.REMOVE_CLUE) && (
+                    <div className="space-y-1">
+                        <select 
+                            className="w-full bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300"
+                            value={action.params.characterId || ''}
+                            onChange={(e) => updateActionParam(action.id, 'characterId', e.target.value)}
+                            onBlur={onBlur}
+                        >
+                            <option value="">-- 目标角色 --</option>
+                            {story.characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                        <select 
+                            className="w-full bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300"
+                            value={action.params.clueId || ''}
+                            onChange={(e) => updateActionParam(action.id, 'clueId', e.target.value)}
+                            onBlur={onBlur}
+                        >
+                            <option value="">-- 选择线索 --</option>
+                            {story.clues.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                    </div>
+                )}
+
+                {action.type === ScriptActionType.SHARE_CLUE && (
+                    <div className="space-y-1">
+                        <div className="flex gap-1">
+                            <select 
+                                className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300"
+                                value={action.params.fromCharacterId || ''}
+                                onChange={(e) => updateActionParam(action.id, 'fromCharacterId', e.target.value)}
+                                onBlur={onBlur}
+                            >
+                                <option value="">From...</option>
+                                {story.characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                            </select>
+                            <span className="text-zinc-500 self-center">to</span>
+                            <select 
+                                className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300"
+                                value={action.params.toCharacterId || ''}
+                                onChange={(e) => updateActionParam(action.id, 'toCharacterId', e.target.value)}
+                                onBlur={onBlur}
+                            >
+                                <option value="">To...</option>
+                                {story.characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                            </select>
+                        </div>
+                        <select 
+                            className="w-full bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300"
+                            value={action.params.clueId || ''}
+                            onChange={(e) => updateActionParam(action.id, 'clueId', e.target.value)}
+                            onBlur={onBlur}
+                        >
+                            <option value="">-- 选择线索 --</option>
+                            {story.clues.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                    </div>
+                )}
+
+                {/* SHOP ACTION */}
+                {action.type === ScriptActionType.OPEN_SHOP && (
+                    <select 
+                        className="w-full bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300"
+                        value={action.params.shopId || ''}
+                        onChange={(e) => updateActionParam(action.id, 'shopId', e.target.value)}
+                        onBlur={onBlur}
+                    >
+                        <option value="">-- 选择商店 --</option>
+                        {(story.shops || []).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                )}
+
+                {action.type === ScriptActionType.SHOW_TOAST && (
+                   <input 
+                      type="text"
+                      className="w-full bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300"
+                      placeholder="Message..."
+                      value={action.params.message || ''}
+                      onChange={(e) => updateActionParam(action.id, 'message', e.target.value)}
+                      onBlur={onBlur}
+                   />
+                )}
+
+                {action.type === ScriptActionType.WAIT && (
+                   <div className="flex items-center gap-2">
+                      <input 
+                        type="number"
+                        className="w-full bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300"
+                        placeholder="Seconds"
+                        value={action.params.duration || ''}
+                        onChange={(e) => updateActionParam(action.id, 'duration', parseFloat(e.target.value))}
+                        onBlur={onBlur}
+                      />
+                      <span className="text-zinc-500">sec</span>
+                   </div>
+                )}
+             </div>
+          </div>
+        );
+      })}
+
+      <div className="relative">
+        {!showMenu ? (
+          <button 
+            onClick={() => setShowMenu(true)}
+            className="w-full py-1.5 border border-dashed border-zinc-700 hover:border-zinc-500 rounded text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors flex items-center justify-center gap-1"
+          >
+            <Plus className="w-3 h-3" /> 添加指令
+          </button>
+        ) : (
+          <div className="bg-zinc-800 border border-zinc-700 rounded shadow-xl py-1 z-50">
+             <div className="text-[10px] uppercase font-bold text-zinc-500 px-2 py-1 bg-zinc-900/50 flex justify-between">
+                <span>Select Action</span>
+                <button onClick={() => setShowMenu(false)}><Plus className="w-3 h-3 rotate-45" /></button>
+             </div>
+             {Object.values(ScriptActionType).map(type => (
+               <button 
+                 key={type} 
+                 onClick={() => addAction(type)} 
+                 className="w-full text-left px-2 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700 flex items-center gap-2 transition-colors"
+               >
+                 <div className={SCRIPT_ACTIONS[type].color}>{SCRIPT_ACTIONS[type].icon}</div>
+                 {SCRIPT_ACTIONS[type].label}
+               </button>
+             ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 };
 
 const Inspector: React.FC = () => {
@@ -80,6 +309,9 @@ const Inspector: React.FC = () => {
   const [aiVariations, setAiVariations] = useState<string[]>([]);
   const [showAddonMenu, setShowAddonMenu] = useState(false);
   const [showEventMenu, setShowEventMenu] = useState(false);
+  
+  // State to track expanded events in Location Node
+  const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
 
   const handleAiGenerate = async () => {
     if (!selectedNode || selectedNode.type !== NodeType.DIALOGUE) return;
@@ -155,28 +387,15 @@ const Inspector: React.FC = () => {
       type: trigger === 'onClick' ? 'interaction' : 'lifecycle',
       trigger,
       targetId,
-      label
+      label,
+      actions: []
     };
 
     startEditing(locNode.id);
     updateNode(locNode.id, { events: [...(locNode.events || []), newEvent] });
     commitEditing();
-    setShowEventMenu(false); // Close menu after adding
-  };
-
-  const addActionCommand = (type: ActionCommandType) => {
-    if (!selectedNode || selectedNode.type !== NodeType.ACTION) return;
-    const actionNode = selectedNode as ActionNode;
-    
-    const newCommand = {
-      id: `cmd_${Date.now()}`,
-      type,
-      params: {}
-    };
-    
-    startEditing(actionNode.id);
-    updateNode(actionNode.id, { commands: [...(actionNode.commands || []), newCommand] });
-    commitEditing();
+    setShowEventMenu(false);
+    setExpandedEventId(newEvent.id); // Auto expand new event
   };
 
   if (!selectedNode) {
@@ -466,10 +685,10 @@ const Inspector: React.FC = () => {
               </div>
             </div>
 
-            {/* Event Manager */}
+            {/* Event Manager (Updated for ECA) */}
             <div>
                <div className="flex justify-between items-center mb-1.5">
-                  <label className="text-[10px] text-zinc-500 uppercase font-semibold">事件与动态端口 (Events)</label>
+                  <label className="text-[10px] text-zinc-500 uppercase font-semibold">事件与逻辑 (Logic Events)</label>
                   <div className="relative">
                     <button 
                       onClick={() => setShowEventMenu(!showEventMenu)}
@@ -477,7 +696,6 @@ const Inspector: React.FC = () => {
                     >
                       <Plus className="w-3 h-3" />
                     </button>
-                    
                     {showEventMenu && (
                       <>
                         <div className="fixed inset-0 z-40" onClick={() => setShowEventMenu(false)}></div>
@@ -488,9 +706,6 @@ const Inspector: React.FC = () => {
                           {(selectedNode as LocationNode).hotspots?.map(hs => (
                             <button key={hs.id} onClick={() => addEvent('onClick', hs.id)} className="w-full text-left px-2 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700 flex items-center gap-2 transition-colors"><Target className="w-3 h-3 text-amber-400" /> Click: {hs.name}</button>
                           ))}
-                          {(!((selectedNode as LocationNode).hotspots?.length)) && (
-                             <div className="px-2 py-1 text-[10px] text-zinc-500 italic text-center">No Hotspots</div>
-                          )}
                         </div>
                       </>
                     )}
@@ -498,28 +713,56 @@ const Inspector: React.FC = () => {
                </div>
                
                <div className="space-y-1.5">
-                  {(selectedNode as LocationNode).events?.map(evt => (
-                    <div key={evt.id} className="flex items-center justify-between p-1.5 bg-zinc-800 rounded border border-zinc-700 text-xs">
-                       <div className="flex items-center gap-2">
-                          <Zap className={`w-3 h-3 ${evt.trigger === 'onClick' ? 'text-amber-400' : 'text-indigo-400'}`} />
-                          <span className="text-zinc-300">{evt.label}</span>
-                       </div>
-                       <button 
-                         onClick={() => {
-                            const node = selectedNode as LocationNode;
-                            startEditing(node.id);
-                            updateNode(node.id, { events: node.events.filter(e => e.id !== evt.id) });
-                            commitEditing();
-                         }}
-                         className="text-zinc-600 hover:text-red-400"
-                       >
-                         <Trash2 className="w-3 h-3" />
-                       </button>
-                    </div>
-                  ))}
+                  {(selectedNode as LocationNode).events?.map(evt => {
+                    const isExpanded = expandedEventId === evt.id;
+                    return (
+                        <div key={evt.id} className="bg-zinc-800 rounded border border-zinc-700 overflow-hidden">
+                            {/* Event Header */}
+                            <div 
+                                className="flex items-center justify-between p-2 cursor-pointer hover:bg-zinc-700/50"
+                                onClick={() => setExpandedEventId(isExpanded ? null : evt.id)}
+                            >
+                                <div className="flex items-center gap-2 text-xs">
+                                    {isExpanded ? <ChevronDown className="w-3 h-3 text-zinc-500"/> : <ChevronRight className="w-3 h-3 text-zinc-500"/>}
+                                    <Zap className={`w-3 h-3 ${evt.trigger === 'onClick' ? 'text-amber-400' : 'text-indigo-400'}`} />
+                                    <span className="text-zinc-300 font-semibold">{evt.label}</span>
+                                    <span className="text-[9px] bg-zinc-900 text-zinc-500 px-1 rounded">{evt.actions?.length || 0} Actions</span>
+                                </div>
+                                <button 
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        const node = selectedNode as LocationNode;
+                                        startEditing(node.id);
+                                        updateNode(node.id, { events: node.events.filter(e => e.id !== evt.id) });
+                                        commitEditing();
+                                    }}
+                                    className="text-zinc-600 hover:text-red-400 p-1"
+                                >
+                                    <Trash2 className="w-3 h-3" />
+                                </button>
+                            </div>
+                            
+                            {/* Actions Editor (Expandable) */}
+                            {isExpanded && (
+                                <div className="p-2 border-t border-zinc-700 bg-zinc-900/30">
+                                    <ActionStackEditor 
+                                        actions={evt.actions || []}
+                                        onChange={(newActions) => {
+                                            const node = selectedNode as LocationNode;
+                                            startEditing(node.id);
+                                            const newEvents = node.events.map(e => e.id === evt.id ? { ...e, actions: newActions } : e);
+                                            updateNode(node.id, { events: newEvents });
+                                        }}
+                                        onBlur={commitEditing}
+                                    />
+                                </div>
+                            )}
+                        </div>
+                    );
+                  })}
                   {!((selectedNode as LocationNode).events?.length) && (
                      <div className="text-[10px] text-zinc-600 italic text-center p-2 border border-dashed border-zinc-800 rounded">
-                       默认：单输出端口
+                       暂无事件
                      </div>
                   )}
                </div>
@@ -534,10 +777,9 @@ const Inspector: React.FC = () => {
               
               <div className="space-y-3">
                 {(selectedNode as BranchNode).conditions?.map((condition, idx) => {
-                  // Find variable definition
-                  const variable = story.globalVariables.find(v => v.id === condition.variableId);
+                  const variable = story.attributes.find(v => v.id === condition.variableId);
                   const varType = variable?.type || 'string';
-                  const availableOps = OPERATORS_BY_TYPE[varType];
+                  const availableOps = OPERATORS_BY_TYPE[varType] || OPERATORS_BY_TYPE['string'];
 
                   return (
                     <div key={condition.id} className="bg-zinc-800 border border-zinc-700 rounded p-2 relative group">
@@ -557,9 +799,7 @@ const Inspector: React.FC = () => {
                               </button>
                         </div>
                         
-                        {/* 3-Part Logic Builder */}
                         <div className="grid gap-2">
-                           {/* 1. Variable Selector */}
                            <select 
                               className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-300 focus:outline-none"
                               value={condition.variableId}
@@ -571,14 +811,13 @@ const Inspector: React.FC = () => {
                               }}
                               onBlur={commitEditing}
                            >
-                             <option value="" disabled>-- 变量 --</option>
-                             {story.globalVariables.map(v => (
+                             <option value="" disabled>-- 属性 (Attribute) --</option>
+                             {story.attributes.map(v => (
                                <option key={v.id} value={v.id}>{v.name}</option>
                              ))}
                            </select>
 
                            <div className="flex gap-2">
-                             {/* 2. Operator Selector */}
                              <select 
                                 className="w-20 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs text-amber-300 font-mono focus:outline-none"
                                 value={condition.operator}
@@ -593,7 +832,6 @@ const Inspector: React.FC = () => {
                                {availableOps.map(op => <option key={op} value={op}>{op}</option>)}
                              </select>
 
-                             {/* 3. Value Input */}
                              {varType === 'boolean' ? (
                                 <select
                                   className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs text-green-300 font-mono focus:outline-none"
@@ -629,9 +867,9 @@ const Inspector: React.FC = () => {
                   );
                 })}
                 
-                {story.globalVariables.length === 0 ? (
+                {story.attributes.length === 0 ? (
                   <div className="text-center text-[10px] text-zinc-500 py-4 border border-dashed border-zinc-800 rounded bg-zinc-900/50">
-                     请先在左侧边栏添加全局变量
+                     请先在 "属性与状态" 面板中添加属性
                   </div>
                 ) : (
                   <button 
@@ -639,7 +877,7 @@ const Inspector: React.FC = () => {
                       const node = selectedNode as BranchNode;
                       startEditing(node.id);
                       // Default to first variable
-                      const firstVar = story.globalVariables[0];
+                      const firstVar = story.attributes[0];
                       updateNode(node.id, { conditions: [...(node.conditions || []), { id: `c_${Date.now()}`, variableId: firstVar?.id || '', operator: '==', value: '0' }] });
                       commitEditing();
                     }}
@@ -652,159 +890,146 @@ const Inspector: React.FC = () => {
            </div>
         )}
 
-        {selectedNode.type === NodeType.SET_VARIABLE && (
-          <div className="space-y-4">
-             <div>
-               <label className="text-[10px] text-zinc-500 uppercase font-semibold block mb-1.5">变量名 (Variable Name)</label>
-               <input 
-                 type="text" 
-                 value={(selectedNode as VariableSetterNode).variableName || ''}
-                 onFocus={() => startEditing(selectedNode.id)}
-                 onChange={(e) => updateNode(selectedNode.id, { variableName: e.target.value })}
-                 onBlur={commitEditing}
-                 className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-sm text-zinc-300 font-mono"
-               />
-             </div>
-
-             {/* Simple Mode UI (Hidden if Advanced Module is active) */}
-             {!(selectedNode as VariableSetterNode).isAdvanced && (
-                <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[10px] text-zinc-500 uppercase font-semibold block mb-1.5">操作 (Op)</label>
-                      <select
-                        value={(selectedNode as VariableSetterNode).operator || 'SET'}
-                        onChange={(e) => {
-                          startEditing(selectedNode.id);
-                          updateNode(selectedNode.id, { operator: e.target.value as any });
-                          commitEditing();
-                        }}
-                        className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-300"
-                      >
-                        <option value="SET">赋值 (=)</option>
-                        <option value="ADD">增加 (+)</option>
-                        <option value="SUB">减少 (-)</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-zinc-500 uppercase font-semibold block mb-1.5">值 (Value)</label>
-                      <input 
-                        type="text" 
-                        value={(selectedNode as VariableSetterNode).value || ''}
-                        onFocus={() => startEditing(selectedNode.id)}
-                        onChange={(e) => updateNode(selectedNode.id, { value: e.target.value })}
-                        onBlur={commitEditing}
-                        className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-sm text-zinc-300 font-mono"
-                      />
-                    </div>
-                </div>
-             )}
-          </div>
-        )}
-
-        {selectedNode.type === NodeType.JUMP && (
-           <div className="space-y-4">
-             <div className="p-2 bg-indigo-900/20 border border-indigo-500/30 rounded flex items-start gap-2">
-               <ArrowRightCircle className="w-4 h-4 text-indigo-400 mt-0.5 shrink-0" />
-               <div className="text-xs text-indigo-200">
-                 结束当前章节，跳转至下一章。
-               </div>
-            </div>
-            <div>
-              <label className="text-[10px] text-zinc-500 uppercase font-semibold block mb-1.5">目标章节 (Target)</label>
-              <select
-                 value={(selectedNode as JumpNode).targetSegmentId || ''}
-                 onChange={(e) => {
-                   startEditing(selectedNode.id);
-                   updateNode(selectedNode.id, { targetSegmentId: e.target.value });
-                   commitEditing();
-                 }}
-                 className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-sm text-zinc-300"
-              >
-                <option value="">-- 选择章节 --</option>
-                {story.segments.map(seg => (
-                  <option key={seg.id} value={seg.id}>{seg.name}</option>
-                ))}
-              </select>
-            </div>
-           </div>
-        )}
-        
-        {/* Action Node Editor */}
+        {/* Action Node Editor (Updated for ECA) */}
         {selectedNode.type === NodeType.ACTION && (
            <div className="space-y-4">
               <label className="text-[10px] text-zinc-500 uppercase font-semibold block mb-1.5">指令序列 (Command Sequence)</label>
-              
-              <div className="flex gap-2 flex-wrap mb-4">
-                 {(Object.keys(ACTION_COMMANDS) as ActionCommandType[]).map(type => (
-                    <button 
-                      key={type}
-                      onClick={() => addActionCommand(type)}
-                      className="flex items-center gap-1 px-2 py-1 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded text-[10px] text-zinc-300 transition-colors"
-                    >
-                      {ACTION_COMMANDS[type].icon}
-                      {ACTION_COMMANDS[type].label}
-                    </button>
-                 ))}
-              </div>
-
-              <div className="space-y-3">
-                 {(selectedNode as ActionNode).commands?.map((cmd, idx) => {
-                    const def = ACTION_COMMANDS[cmd.type];
-                    return (
-                      <div key={cmd.id} className="bg-zinc-800/50 border border-zinc-700 rounded p-2 relative group">
-                         <div className="flex items-center gap-2 mb-2 pb-2 border-b border-zinc-700/50">
-                            <span className="text-[10px] font-mono text-zinc-500 w-4">{idx + 1}</span>
-                            <div className="text-zinc-400">{def.icon}</div>
-                            <span className="text-xs font-bold text-zinc-200">{def.label}</span>
-                            
-                            <button 
-                              onClick={() => {
-                                const node = selectedNode as ActionNode;
-                                startEditing(node.id);
-                                updateNode(node.id, { commands: node.commands.filter(c => c.id !== cmd.id) });
-                                commitEditing();
-                              }}
-                              className="absolute top-2 right-2 text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                         </div>
-                         
-                         <div className="grid gap-2">
-                           {def.params.map(param => (
-                             <div key={param.key} className="flex items-center gap-2">
-                               <label className="text-[10px] text-zinc-500 w-20 truncate">{param.label}</label>
-                               <input 
-                                 type={param.type}
-                                 value={cmd.params[param.key] || ''}
-                                 onChange={(e) => {
-                                    const node = selectedNode as ActionNode;
-                                    startEditing(node.id);
-                                    const newCommands = [...node.commands];
-                                    const val = param.type === 'number' ? parseFloat(e.target.value) : e.target.value;
-                                    newCommands[idx] = { 
-                                      ...cmd, 
-                                      params: { ...cmd.params, [param.key]: val } 
-                                    };
-                                    updateNode(node.id, { commands: newCommands });
-                                 }}
-                                 onBlur={commitEditing}
-                                 className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-1.5 py-0.5 text-xs text-zinc-300"
-                               />
-                             </div>
-                           ))}
-                         </div>
-                      </div>
-                    );
-                 })}
-                 
-                 {(!((selectedNode as ActionNode).commands?.length)) && (
-                    <div className="text-center text-zinc-600 italic text-[10px] mt-4">Empty Sequence</div>
-                )}
-             </div>
+              <ActionStackEditor 
+                  actions={(selectedNode as ActionNode).actions || []}
+                  onChange={(newActions) => {
+                      startEditing(selectedNode.id);
+                      updateNode(selectedNode.id, { actions: newActions });
+                  }}
+                  onBlur={commitEditing}
+              />
            </div>
         )}
 
+        {/* Vote Node Editor (NEW) */}
+        {selectedNode.type === NodeType.VOTE && (
+            <div className="space-y-4">
+                {/* 1. Question Title */}
+                <div>
+                    <label className="text-[10px] text-zinc-500 uppercase font-semibold block mb-1.5">投票问题 (Question)</label>
+                    <input 
+                        className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-2 text-sm text-zinc-300 focus:border-violet-500 focus:outline-none"
+                        value={(selectedNode as VoteNode).voteConfig.title}
+                        onChange={(e) => {
+                            startEditing(selectedNode.id);
+                            updateNode(selectedNode.id, { voteConfig: { ...(selectedNode as VoteNode).voteConfig, title: e.target.value } });
+                        }}
+                        onBlur={commitEditing}
+                    />
+                </div>
+
+                {/* 2. Duration */}
+                <div>
+                    <label className="text-[10px] text-zinc-500 uppercase font-semibold block mb-1.5">时长 (Duration)</label>
+                    <div className="flex items-center gap-2">
+                        <Timer className="w-4 h-4 text-zinc-500" />
+                        <input 
+                            type="number"
+                            className="w-20 bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-300 focus:border-violet-500 focus:outline-none"
+                            value={(selectedNode as VoteNode).voteConfig.duration}
+                            onChange={(e) => {
+                                startEditing(selectedNode.id);
+                                updateNode(selectedNode.id, { voteConfig: { ...(selectedNode as VoteNode).voteConfig, duration: parseInt(e.target.value) || 0 } });
+                            }}
+                            onBlur={commitEditing}
+                        />
+                        <span className="text-xs text-zinc-500">seconds</span>
+                    </div>
+                </div>
+
+                {/* 3. Options */}
+                <div>
+                    <div className="flex justify-between items-center mb-1.5">
+                        <label className="text-[10px] text-zinc-500 uppercase font-semibold">选项 (Options)</label>
+                        <button 
+                            onClick={() => {
+                                const node = selectedNode as VoteNode;
+                                startEditing(node.id);
+                                const newId = `opt_${Date.now()}`;
+                                updateNode(node.id, { 
+                                    voteConfig: { 
+                                        ...node.voteConfig, 
+                                        options: [...node.voteConfig.options, { id: newId, text: 'New Option', isCorrect: false, score: 0 }] 
+                                    } 
+                                });
+                                commitEditing();
+                            }}
+                            className="p-1 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded transition-colors"
+                        >
+                            <Plus className="w-3 h-3" />
+                        </button>
+                    </div>
+
+                    <div className="space-y-2">
+                        {(selectedNode as VoteNode).voteConfig.options.map((opt, i) => (
+                            <div key={opt.id} className="bg-zinc-800 border border-zinc-700 rounded p-2 space-y-2 group">
+                                <div className="flex gap-2 items-center">
+                                    <input 
+                                        className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-violet-500"
+                                        value={opt.text}
+                                        onChange={(e) => {
+                                            const node = selectedNode as VoteNode;
+                                            const newOptions = [...node.voteConfig.options];
+                                            newOptions[i] = { ...opt, text: e.target.value };
+                                            updateNode(node.id, { voteConfig: { ...node.voteConfig, options: newOptions } });
+                                        }}
+                                        onBlur={commitEditing}
+                                        placeholder="Option Text..."
+                                    />
+                                    <button 
+                                        onClick={() => {
+                                            const node = selectedNode as VoteNode;
+                                            const newOptions = node.voteConfig.options.filter(o => o.id !== opt.id);
+                                            updateNode(node.id, { voteConfig: { ...node.voteConfig, options: newOptions } });
+                                            commitEditing();
+                                        }}
+                                        className="text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100"
+                                    >
+                                        <Trash2 className="w-3 h-3" />
+                                    </button>
+                                </div>
+                                <div className="flex items-center gap-4">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[10px] text-zinc-500">Score</span>
+                                        <input 
+                                            type="number"
+                                            className="w-12 bg-zinc-900 border border-zinc-700 rounded px-1 py-0.5 text-[10px] text-zinc-300 text-center"
+                                            value={opt.score || 0}
+                                            onChange={(e) => {
+                                                const node = selectedNode as VoteNode;
+                                                const newOptions = [...node.voteConfig.options];
+                                                newOptions[i] = { ...opt, score: parseInt(e.target.value) || 0 };
+                                                updateNode(node.id, { voteConfig: { ...node.voteConfig, options: newOptions } });
+                                            }}
+                                            onBlur={commitEditing}
+                                        />
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <input 
+                                            type="checkbox"
+                                            checked={opt.isCorrect || false}
+                                            onChange={(e) => {
+                                                const node = selectedNode as VoteNode;
+                                                const newOptions = [...node.voteConfig.options];
+                                                newOptions[i] = { ...opt, isCorrect: e.target.checked };
+                                                updateNode(node.id, { voteConfig: { ...node.voteConfig, options: newOptions } });
+                                                commitEditing();
+                                            }}
+                                            className="rounded border-zinc-700 bg-zinc-900 text-violet-500 focus:ring-violet-500/50"
+                                        />
+                                        <span className="text-[10px] text-zinc-500">Correct Answer</span>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        )}
 
         {/* 3. MODULES / ADD-ONS (Optional) */}
         
@@ -938,28 +1163,6 @@ const Inspector: React.FC = () => {
               <div className="text-xs text-zinc-400 p-1 bg-zinc-900 rounded border border-zinc-800">
                  从画布连接点连接目标...
               </div>
-           </div>
-        )}
-
-        {/* Module: Advanced Mode (Variable) */}
-        {(selectedNode as VariableSetterNode).isAdvanced && (
-           <div className="border border-zinc-700 rounded bg-zinc-800/30 p-3 relative group">
-              <button onClick={() => removeAddon('isAdvanced')} className="absolute top-2 right-2 text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 className="w-3 h-3" /></button>
-              <div className="flex items-center gap-2 mb-2 text-purple-400">
-                <Code className="w-3 h-3" />
-                <span className="text-xs font-bold uppercase">高级表达式</span>
-              </div>
-              <textarea 
-                rows={3}
-                placeholder="e.g. coin = coin + (level * 10)"
-                value={(selectedNode as VariableSetterNode).value}
-                onChange={(e) => {
-                   startEditing(selectedNode.id);
-                   updateNode(selectedNode.id, { value: e.target.value });
-                }}
-                onBlur={commitEditing}
-                className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-300 font-mono resize-none focus:outline-none focus:border-purple-500"
-              />
            </div>
         )}
 

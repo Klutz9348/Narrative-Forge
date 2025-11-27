@@ -10,8 +10,9 @@ export enum NodeType {
   LOCATION = 'LOCATION',
   BRANCH = 'BRANCH',
   JUMP = 'JUMP',
-  SET_VARIABLE = 'SET_VARIABLE',
+  SET_VARIABLE = 'SET_VARIABLE', // Deprecated in favor of ActionNode logic, but kept for compatibility
   ACTION = 'ACTION', 
+  VOTE = 'VOTE', // New: Multiplayer Vote
 }
 
 export interface NodeData {
@@ -21,13 +22,11 @@ export interface NodeData {
   position: Vector2;
   size: Vector2;
   parentId?: string; // Hierarchical support
-  // Visual specific: does this node have dynamic outputs?
-  childrenIds?: string[]; // Deprecated in favor of edges, kept for compatibility if needed
+  childrenIds?: string[]; 
 }
 
 export interface StartNode extends NodeData {
   type: NodeType.START;
-  // Start node has no specific data, it just acts as a trigger
 }
 
 export interface DialogueNode extends NodeData {
@@ -36,10 +35,35 @@ export interface DialogueNode extends NodeData {
   text: string;
   choices: { id: string; text: string; nextNodeId?: string }[];
   
-  // Add-ons (Optional Modules)
+  // Add-ons
   voiceId?: string;
   expression?: string;
   placement?: 'left' | 'center' | 'right';
+}
+
+// --- ECA System (Event-Condition-Action) ---
+
+export enum ScriptActionType {
+  UPDATE_ATTRIBUTE = 'UPDATE_ATTRIBUTE',
+  ADD_ITEM = 'ADD_ITEM',
+  REMOVE_ITEM = 'REMOVE_ITEM',
+  PLAY_SOUND = 'PLAY_SOUND',
+  WAIT = 'WAIT',
+  SCREEN_SHAKE = 'SCREEN_SHAKE',
+  SHOW_TOAST = 'SHOW_TOAST',
+  // Phase 3: Social & Knowledge
+  ADD_CLUE = 'ADD_CLUE',
+  REMOVE_CLUE = 'REMOVE_CLUE',
+  SHARE_CLUE = 'SHARE_CLUE',
+  // Phase 4: Interaction & Economy
+  OPEN_SHOP = 'OPEN_SHOP',
+  OPEN_CRAFTING = 'OPEN_CRAFTING'
+}
+
+export interface ScriptAction {
+  id: string;
+  type: ScriptActionType;
+  params: Record<string, any>;
 }
 
 // Event System Types
@@ -51,24 +75,22 @@ export interface NodeEvent {
   type: NodeEventType;
   trigger: NodeEventTrigger;
   label: string;
-  targetId?: string; // e.g., hotspotId for 'onClick' events
+  targetId?: string; // e.g., hotspotId
+  actions: ScriptAction[]; // The logic payload
 }
 
 export interface Hotspot {
   id: string;
   name: string;
-  rect: { x: number; y: number; w: number; h: number }; // percentage 0-100 relative to node size or image container
-  image?: string; // Optional overlay image for the hotspot
+  rect: { x: number; y: number; w: number; h: number }; 
+  image?: string; 
 }
 
 export interface LocationNode extends NodeData {
   type: NodeType.LOCATION;
   backgroundImage: string;
-  
-  // Add-ons (Optional Modules)
-  hotspots: Hotspot[]; // Define the geometric areas
-  events: NodeEvent[]; // Define logic ports (OnEnter, OnClick Hotspot A, etc.)
-  
+  hotspots: Hotspot[]; 
+  events: NodeEvent[]; 
   bgm?: string;
   filter?: string;
 }
@@ -81,9 +103,10 @@ export interface LogicCondition {
   id: string;
   variableId: string;
   operator: LogicOperator;
-  value: string; // The target value to compare against
+  value: string; 
 }
 
+// Deprecated: Use AttributeDefinition instead
 export interface GlobalVariable {
   id: string;
   name: string;
@@ -91,64 +114,102 @@ export interface GlobalVariable {
   defaultValue: any;
 }
 
-// 新增：道具 (Item)
+// New: RPG Attribute Definition
+export interface AttributeDefinition {
+  id: string;
+  key: string;      // e.g., 'sanity' (internal ref)
+  name: string;     // e.g., '理智值' (display name)
+  type: VariableType;
+  defaultValue: any;
+  min?: number;     // For number type
+  max?: number;     // For number type
+  icon?: string;    // Lucide icon name or URL
+  description?: string;
+}
+
+// New: Item Crafting Recipe
+export interface ItemRecipe {
+  ingredients: { itemId: string; count: number }[];
+  costAttribute?: { attributeId: string; amount: number }; // e.g., Cost 10 Coin
+}
+
 export interface Item {
   id: string;
   name: string;
   description: string;
   icon?: string;
+  stackable?: boolean; // Can allow multiple?
+  recipe?: ItemRecipe; // If present, this item can be crafted
 }
 
-// 新增：线索 (Clue)
+// New: Shop Definition
+export interface ShopItem {
+  itemId: string;
+  price: number;
+  currencyAttributeId: string; // Which attribute pays for this? e.g. 'coin'
+  stock?: number; // Infinite if undefined
+}
+
+export interface ShopDefinition {
+  id: string;
+  name: string;
+  description?: string;
+  background?: string;
+  inventory: ShopItem[];
+}
+
 export interface Clue {
   id: string;
   name: string;
   description: string;
   revealed: boolean;
+  owners?: string[]; // IDs of characters who have this clue
 }
 
-// 新增：分支节点
 export interface BranchNode extends NodeData {
   type: NodeType.BRANCH;
-  // 分支条件列表
   conditions: LogicCondition[];
-  
-  // Add-ons (Optional Modules)
-  defaultNextNodeId?: string; // Else path
+  defaultNextNodeId?: string; 
 }
 
-// 新增：变量设置节点
 export interface VariableSetterNode extends NodeData {
   type: NodeType.SET_VARIABLE;
-  variableName: string;   // 要修改的变量名，如 "coin"
-  operator: 'SET' | 'ADD' | 'SUB'; // 操作符：赋值、加、减
-  value: string;          // 值，如 "10", "true", "player_name"
-  
-  // Add-ons
-  isAdvanced?: boolean; // If true, value is treated as an expression formula
+  variableName: string;   
+  operator: 'SET' | 'ADD' | 'SUB'; 
+  value: string;          
+  isAdvanced?: boolean; 
 }
 
-// 新增：跳转节点 (跨章节)
 export interface JumpNode extends NodeData {
   type: NodeType.JUMP;
-  targetSegmentId: string; // 跳转到的目标章节 ID
-}
-
-// 新增：动作/脚本节点
-export type ActionCommandType = 'playSound' | 'wait' | 'screenShake' | 'showToast';
-
-export interface ActionCommand {
-  id: string;
-  type: ActionCommandType;
-  params: Record<string, any>;
+  targetSegmentId: string; 
 }
 
 export interface ActionNode extends NodeData {
   type: NodeType.ACTION;
-  commands: ActionCommand[];
+  actions: ScriptAction[]; // Replaced legacy commands
 }
 
-// 更新 NarrativeNode 联合类型
+// New: Vote Node
+export interface VoteOption {
+  id: string;
+  text: string;
+  isCorrect?: boolean; // For mystery solving
+  score?: number;      // Points awarded
+}
+
+export interface VoteConfig {
+  title: string;       // The question
+  duration: number;    // Seconds
+  options: VoteOption[];
+  strategy: 'majority' | 'score' | 'branch'; // How to proceed
+}
+
+export interface VoteNode extends NodeData {
+  type: NodeType.VOTE;
+  voteConfig: VoteConfig;
+}
+
 export type NarrativeNode = 
   | StartNode
   | DialogueNode 
@@ -157,14 +218,15 @@ export type NarrativeNode =
   | VariableSetterNode 
   | JumpNode 
   | ActionNode
+  | VoteNode
   | NodeData;
 
 export interface Edge {
   id: string;
   sourceNodeId: string;
   targetNodeId: string;
-  sourceHandleId?: string; // For nodes with multiple outputs (e.g. choices, branches, events)
-  condition?: string; // Expression string, e.g. "sanity > 50"
+  sourceHandleId?: string; 
+  condition?: string; 
 }
 
 export interface SegmentAsset {
@@ -189,27 +251,29 @@ export interface StoryAsset {
   description: string;
   segments: SegmentAsset[];
   characters: CharacterAsset[];
-  items: Item[]; // New
-  clues: Clue[]; // New
+  items: Item[]; 
+  shops: ShopDefinition[]; // New
+  clues: Clue[]; 
   activeSegmentId: string;
+  attributes: AttributeDefinition[]; 
   globalVariables: GlobalVariable[]; 
 }
 
 // --- Editor UI Types ---
 
-export type TabType = 'canvas' | 'variable' | 'character' | 'item' | 'clue';
+export type TabType = 'canvas' | 'variable' | 'character' | 'item' | 'clue' | 'shop';
 
 export interface EditorTab {
   id: string;
   type: TabType;
   label: string;
-  dataId?: string; // For character/item ID
+  dataId?: string; 
   icon?: any;
 }
 
 export interface EditorState {
   story: StoryAsset;
-  selection: string[]; // IDs of selected nodes
+  selection: string[]; 
   canvasTransform: {
     x: number;
     y: number;
@@ -219,6 +283,6 @@ export interface EditorState {
     isDragging: boolean;
     startX: number;
     startY: number;
-    nodeId?: string; // If dragging a specific node
+    nodeId?: string; 
   } | null;
 }

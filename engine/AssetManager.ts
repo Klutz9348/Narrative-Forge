@@ -1,5 +1,5 @@
 
-import { NarrativeNode, NodeType, StoryAsset, SegmentAsset, Edge, Vector2 } from '../types';
+import { NarrativeNode, NodeType, StoryAsset, SegmentAsset, Edge, Vector2, VoteNode } from '../types';
 
 export class AssetManager {
   static generateId(prefix: string = 'id'): string {
@@ -17,7 +17,9 @@ export class AssetManager {
       characters: [],
       segments: [firstSegment],
       globalVariables: [],
+      attributes: [],
       items: [],
+      shops: [],
       clues: []
     };
   }
@@ -54,7 +56,7 @@ export class AssetManager {
       case NodeType.DIALOGUE:
         return { ...base, name: 'Dialogue', characterId: '', text: '...', choices: [] } as any;
       case NodeType.LOCATION:
-        return { ...base, name: 'Location', backgroundImage: '', hotspots: [] } as any;
+        return { ...base, name: 'Location', backgroundImage: '', hotspots: [], events: [] } as any;
       case NodeType.BRANCH:
         return { ...base, name: 'Logic Branch', conditions: [] } as any;
       case NodeType.SET_VARIABLE:
@@ -62,7 +64,19 @@ export class AssetManager {
       case NodeType.JUMP:
         return { ...base, name: 'Jump to...', targetSegmentId: '', size: { x: 250, y: 120 } } as any;
       case NodeType.ACTION:
-        return { ...base, name: 'Action Sequence', commands: [], size: { x: 250, y: 200 } } as any;
+        return { ...base, name: 'Action Sequence', actions: [], size: { x: 250, y: 200 } } as any;
+      case NodeType.VOTE:
+        return { 
+          ...base, 
+          name: 'Vote', 
+          voteConfig: {
+            title: 'Vote Question', 
+            duration: 30, 
+            options: [], 
+            strategy: 'majority'
+          },
+          size: { x: 300, y: 250 } 
+        } as VoteNode;
       default:
         return base as NarrativeNode;
     }

@@ -1,6 +1,6 @@
 
 import { create } from 'zustand';
-import { StoryAsset, NodeType, NarrativeNode, Edge, GlobalVariable, VariableType, CharacterAsset, Item, Clue, EditorTab, TabType } from '../types';
+import { StoryAsset, NodeType, NarrativeNode, Edge, GlobalVariable, AttributeDefinition, CharacterAsset, Item, Clue, EditorTab, TabType, ScriptActionType, VoteNode, ShopDefinition } from '../types';
 import { CommandBus } from '../engine/CommandBus';
 import { AssetManager } from '../engine/AssetManager';
 import { SelectionManager } from '../engine/SelectionManager';
@@ -13,10 +13,36 @@ const INITIAL_STORY: StoryAsset = {
   title: '赛博东京之影',
   description: '发生在霓虹闪烁的未来的黑色侦探惊悚片。',
   activeSegmentId: 'seg_1',
-  globalVariables: [
-    { id: 'var_coin', name: 'coin', type: 'number', defaultValue: 0 },
-    { id: 'var_sanity', name: 'sanity', type: 'number', defaultValue: 100 },
-    { id: 'var_hasKey', name: 'hasKey', type: 'boolean', defaultValue: false },
+  // Legacy support
+  globalVariables: [], 
+  // New RPG Attributes
+  attributes: [
+    { 
+        id: 'attr_sanity', 
+        key: 'sanity', 
+        name: '理智值 (Sanity)', 
+        type: 'number', 
+        defaultValue: 100, 
+        min: 0, 
+        max: 100, 
+        description: '角色的精神健康状态，归零时游戏结束。' 
+    },
+    { 
+        id: 'attr_coin', 
+        key: 'coin', 
+        name: '新日元 (Credits)', 
+        type: 'number', 
+        defaultValue: 500,
+        min: 0,
+        description: '通用货币，用于购买道具。'
+    },
+    { 
+        id: 'attr_haskey', 
+        key: 'hasKey', 
+        name: '拥有密匙', 
+        type: 'boolean', 
+        defaultValue: false 
+    },
   ],
   characters: [
     { id: 'char_1', name: 'K 探员', avatarUrl: 'https://picsum.photos/id/64/200/200', description: '一位从不睡觉的私家侦探。' },
@@ -24,11 +50,33 @@ const INITIAL_STORY: StoryAsset = {
   ],
   items: [
     { id: 'item_1', name: '生锈的钥匙', description: '看起来很久没用了，也许能打开旧城区的某扇门。' },
-    { id: 'item_2', name: '加密芯片', description: '由于防火墙保护，无法直接读取内容。' }
+    { 
+        id: 'item_2', 
+        name: '万能解码器', 
+        description: '黑客工具，需要电池驱动。',
+        recipe: {
+            ingredients: [
+                { itemId: 'item_3', count: 1 },
+            ],
+            costAttribute: { attributeId: 'attr_coin', amount: 50 }
+        }
+    },
+    { id: 'item_3', name: '废旧电池', description: '虽然旧了点，但还有电。' }
+  ],
+  shops: [
+      {
+          id: 'shop_1',
+          name: '黑市 (Dark Web)',
+          description: '只有最绝望的人才会来这里交易。',
+          inventory: [
+              { itemId: 'item_2', price: 200, currencyAttributeId: 'attr_coin' },
+              { itemId: 'item_3', price: 50, currencyAttributeId: 'attr_coin' }
+          ]
+      }
   ],
   clues: [
-    { id: 'clue_1', name: '神秘电话', description: '电话那头的声音经过了变声处理，提到“午夜钟声”。', revealed: true },
-    { id: 'clue_2', name: '湿润的脚印', description: '办公室门口有一串未干的脚印，尺寸很大。', revealed: false }
+    { id: 'clue_1', name: '神秘电话', description: '电话那头的声音经过了变声处理，提到“午夜钟声”。', revealed: true, owners: ['char_1'] },
+    { id: 'clue_2', name: '湿润的脚印', description: '办公室门口有一串未干的脚印，尺寸很大。', revealed: false, owners: [] }
   ],
   segments: [
     {
@@ -52,7 +100,24 @@ const INITIAL_STORY: StoryAsset = {
           backgroundImage: 'https://picsum.photos/id/180/800/600',
           hotspots: [],
           events: [
-            { id: 'evt_1', type: 'lifecycle', trigger: 'onEnter', label: '进入时 (Auto)' }
+            { 
+                id: 'evt_1', 
+                type: 'lifecycle', 
+                trigger: 'onEnter', 
+                label: '进入时 (Auto)',
+                actions: [
+                    { 
+                        id: 'act_1', 
+                        type: ScriptActionType.UPDATE_ATTRIBUTE, 
+                        params: { attributeId: 'attr_sanity', op: 'add', value: -5 } 
+                    },
+                    {
+                        id: 'act_2',
+                        type: ScriptActionType.SHOW_TOAST,
+                        params: { message: '感觉一阵寒意... (Sanity -5)' }
+                    }
+                ] 
+            }
           ]
         } as NarrativeNode,
         'node_2': {
@@ -70,14 +135,20 @@ const INITIAL_STORY: StoryAsset = {
         } as NarrativeNode,
          'node_3': {
           id: 'node_3',
-          type: NodeType.DIALOGUE,
-          name: '接听电话',
+          type: NodeType.VOTE,
+          name: '抉择时刻',
           position: { x: 1150, y: 100 },
-          size: { x: 300, y: 150 },
-          characterId: 'char_1',
-          text: '这里是 K。说吧。',
-          choices: []
-        } as NarrativeNode,
+          size: { x: 300, y: 200 },
+          voteConfig: {
+              title: "接听还是挂断？",
+              duration: 15,
+              options: [
+                  { id: 'v1', text: '接听', score: 10, isCorrect: true },
+                  { id: 'v2', text: '挂断', score: 0, isCorrect: false }
+              ],
+              strategy: 'majority'
+          }
+        } as VoteNode,
         'node_4': {
           id: 'node_4',
           type: NodeType.DIALOGUE,
@@ -136,10 +207,10 @@ interface EditorState {
   removeEdge: (id: string) => void;
   deleteSelection: () => void;
   
-  // Global Variable CRUD
-  addGlobalVariable: () => void;
-  updateGlobalVariable: (id: string, data: Partial<GlobalVariable>) => void;
-  removeGlobalVariable: (id: string) => void;
+  // Attribute CRUD (Replaces Global Variables)
+  addAttribute: () => void;
+  updateAttribute: (id: string, data: Partial<AttributeDefinition>) => void;
+  removeAttribute: (id: string) => void;
 
   // Character CRUD
   addCharacter: () => void;
@@ -150,6 +221,11 @@ interface EditorState {
   addItem: () => void;
   updateItem: (id: string, data: Partial<Item>) => void;
   removeItem: (id: string) => void;
+
+  // Shop CRUD
+  addShop: () => void;
+  updateShop: (id: string, data: Partial<ShopDefinition>) => void;
+  removeShop: (id: string) => void;
 
   // Clue CRUD
   addClue: () => void;
@@ -381,29 +457,32 @@ export const useEditorStore = create<EditorState>((set, get) => {
         syncCommandState();
     },
 
-    // --- Global Variable CRUD ---
-    addGlobalVariable: () => {
+    // --- Attribute CRUD ---
+    addAttribute: () => {
         set(state => {
-            const newVar: GlobalVariable = {
-                id: `var_${Date.now()}`,
-                name: 'new_variable',
-                type: 'boolean',
-                defaultValue: false
+            const newAttr: AttributeDefinition = {
+                id: `attr_${Date.now()}`,
+                key: 'new_stat',
+                name: 'New Attribute',
+                type: 'number',
+                defaultValue: 0,
+                min: 0,
+                max: 100
             };
-            return { story: { ...state.story, globalVariables: [...state.story.globalVariables, newVar] } };
+            return { story: { ...state.story, attributes: [...state.story.attributes, newAttr] } };
         });
     },
-    updateGlobalVariable: (id, data) => {
+    updateAttribute: (id, data) => {
         set(state => ({
             story: {
                 ...state.story,
-                globalVariables: state.story.globalVariables.map(v => v.id === id ? { ...v, ...data } : v)
+                attributes: state.story.attributes.map(a => a.id === id ? { ...a, ...data } : a)
             }
         }));
     },
-    removeGlobalVariable: (id) => {
+    removeAttribute: (id) => {
         set(state => ({
-            story: { ...state.story, globalVariables: state.story.globalVariables.filter(v => v.id !== id) }
+            story: { ...state.story, attributes: state.story.attributes.filter(a => a.id !== id) }
         }));
     },
 
@@ -416,7 +495,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
                 avatarUrl: 'https://picsum.photos/200',
                 description: ''
             };
-            // Automatically open tab for new character
             const tabId = `character_${newChar.id}`;
             return {
                 story: {
@@ -434,7 +512,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
                 ...state.story,
                 characters: state.story.characters.map(c => c.id === id ? { ...c, ...data } : c)
             };
-            // Update tab label if name changed
             const newTabs = state.tabs.map(t => t.dataId === id ? { ...t, label: data.name || t.label } : t);
             return { story: newStory, tabs: newTabs };
         });
@@ -442,7 +519,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
     removeCharacter: (id) => {
         set(state => ({
             story: { ...state.story, characters: state.story.characters.filter(c => c.id !== id) },
-            // Close tab if open
             tabs: state.tabs.filter(t => t.dataId !== id),
             activeTabId: state.activeTabId === `character_${id}` ? 'canvas' : state.activeTabId
         }));
@@ -482,6 +558,44 @@ export const useEditorStore = create<EditorState>((set, get) => {
             story: { ...state.story, items: state.story.items.filter(i => i.id !== id) },
              tabs: state.tabs.filter(t => t.dataId !== id),
             activeTabId: state.activeTabId === `item_${id}` ? 'canvas' : state.activeTabId
+        }));
+    },
+
+    // --- Shop CRUD ---
+    addShop: () => {
+         set(state => {
+            const newShop = {
+                id: `shop_${Date.now()}`,
+                name: '新商店',
+                description: '神秘的交易场所...',
+                inventory: []
+            };
+            const tabId = `shop_${newShop.id}`;
+            return {
+                story: {
+                    ...state.story,
+                    shops: [...(state.story.shops || []), newShop]
+                },
+                tabs: [...state.tabs, { id: tabId, type: 'shop', label: newShop.name, dataId: newShop.id }],
+                activeTabId: tabId
+            };
+        });
+    },
+    updateShop: (id, data) => {
+         set(state => {
+             const newStory = {
+                ...state.story,
+                shops: (state.story.shops || []).map(s => s.id === id ? { ...s, ...data } : s)
+            };
+            const newTabs = state.tabs.map(t => t.dataId === id ? { ...t, label: data.name || t.label } : t);
+            return { story: newStory, tabs: newTabs };
+        });
+    },
+    removeShop: (id) => {
+        set(state => ({
+            story: { ...state.story, shops: (state.story.shops || []).filter(s => s.id !== id) },
+             tabs: state.tabs.filter(t => t.dataId !== id),
+            activeTabId: state.activeTabId === `shop_${id}` ? 'canvas' : state.activeTabId
         }));
     },
 

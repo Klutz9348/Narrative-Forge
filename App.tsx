@@ -1,23 +1,24 @@
 
 import React from 'react';
-import { Play, Save, Undo, Redo, X, Box, Variable, Users, Package, Search } from 'lucide-react';
+import { Play, Save, Undo, Redo, X, Box, Variable, Users, Package, Search, Gauge, ShoppingCart } from 'lucide-react';
 import { useEditorStore } from './store/useEditorStore';
 
 // Components
 import Sidebar from './components/Sidebar';
 import Inspector from './components/Inspector';
 import Canvas from './components/Canvas';
-import { CharacterEditor, ItemEditor, ClueEditor, VariableEditor } from './components/AssetEditors';
+import { CharacterEditor, ItemEditor, ClueEditor, AttributeEditor, ShopEditor } from './components/AssetEditors';
 import { TabType } from './types';
 
 // Helper to get icon for tab
 const getTabIcon = (type: TabType) => {
     switch (type) {
         case 'canvas': return <Box className="w-3 h-3 text-indigo-400" />;
-        case 'variable': return <Variable className="w-3 h-3 text-purple-400" />;
+        case 'variable': return <Gauge className="w-3 h-3 text-purple-400" />;
         case 'character': return <Users className="w-3 h-3 text-rose-400" />;
         case 'item': return <Package className="w-3 h-3 text-amber-400" />;
         case 'clue': return <Search className="w-3 h-3 text-blue-400" />;
+        case 'shop': return <ShoppingCart className="w-3 h-3 text-emerald-400" />;
         default: return <Box className="w-3 h-3" />;
     }
 };
@@ -32,10 +33,11 @@ function App() {
 
       switch (activeTab.type) {
           case 'canvas': return <Canvas />;
-          case 'variable': return <VariableEditor />;
+          case 'variable': return <AttributeEditor />; // Replaced VariableEditor
           case 'character': return <CharacterEditor id={activeTab.dataId} />;
           case 'item': return <ItemEditor id={activeTab.dataId} />;
           case 'clue': return <ClueEditor id={activeTab.dataId} />;
+          case 'shop': return <ShopEditor id={activeTab.dataId} />;
           default: return <Canvas />;
       }
   };
@@ -114,9 +116,7 @@ function App() {
         </div>
       </div>
 
-      {/* Inspector is only visible when Canvas is active, OR we could keep it for global properties? 
-          For now, Inspector is mostly for Nodes, so let's hide it if not on Canvas 
-      */}
+      {/* Inspector is only visible when Canvas is active */}
       {activeTab?.type === 'canvas' && <Inspector />}
     </div>
   );

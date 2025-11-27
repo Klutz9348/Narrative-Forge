@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Layers, Box, Plus, Type, Image as ImageIcon, Variable, Trash2, Users, Search, Package, Ghost, ChevronRight, ChevronDown } from 'lucide-react';
+import { Layers, Box, Plus, Type, Image as ImageIcon, Gauge, Trash2, Users, Search, Package, Ghost, ChevronRight, ChevronDown, ShoppingCart } from 'lucide-react';
 import { NodeType, NarrativeNode } from '../types';
 import { useEditorStore } from '../store/useEditorStore';
 
@@ -31,7 +31,7 @@ const SidebarSection: React.FC<{
 };
 
 const Sidebar: React.FC = () => {
-  const { story, selectedIds, selectNode, openTab, addCharacter, addItem, addClue } = useEditorStore();
+  const { story, selectedIds, selectNode, openTab, addCharacter, addItem, addClue, addShop } = useEditorStore();
   const activeSegment = story.segments.find(s => s.id === story.activeSegmentId);
 
   return (
@@ -81,22 +81,22 @@ const Sidebar: React.FC = () => {
             </div>
         </SidebarSection>
 
-        {/* 2. Global Variables */}
+        {/* 2. Attributes & State (Renamed) */}
         <SidebarSection 
-            title="全局变量" 
-            icon={<Variable className="w-4 h-4 text-purple-500" />}
+            title="属性与状态" 
+            icon={<Gauge className="w-4 h-4 text-purple-500" />}
             action={
                 <button 
                     onClick={() => openTab('variable')}
                     className="p-1 hover:bg-zinc-700 rounded text-zinc-500 hover:text-white mr-2"
-                    title="管理变量"
+                    title="管理属性"
                 >
-                    <Variable className="w-3 h-3" />
+                    <Gauge className="w-3 h-3" />
                 </button>
             }
         >
              <div className="px-4 py-2 text-xs text-zinc-500 hover:text-zinc-300 cursor-pointer flex items-center gap-2" onClick={() => openTab('variable')}>
-                 <span className="italic">点击管理 {story.globalVariables.length} 个变量...</span>
+                 <span className="italic">点击管理 {story.attributes.length} 个属性 (HP, Coin...)</span>
              </div>
         </SidebarSection>
 
@@ -148,7 +148,30 @@ const Sidebar: React.FC = () => {
              </div>
         </SidebarSection>
 
-        {/* 5. Clues */}
+        {/* 5. Shops */}
+        <SidebarSection 
+            title="商业 (Shops)" 
+            icon={<ShoppingCart className="w-4 h-4 text-emerald-500" />}
+            action={
+                <button onClick={addShop} className="p-1 hover:bg-zinc-700 rounded text-zinc-500 hover:text-white mr-2"><Plus className="w-3 h-3" /></button>
+            }
+        >
+             <div className="px-2 space-y-0.5 mt-1">
+                {(story.shops || []).map(shop => (
+                    <div 
+                        key={shop.id}
+                        onClick={() => openTab('shop', shop.id, shop.name)}
+                        className="flex items-center gap-2 px-3 py-1.5 rounded text-xs text-zinc-400 hover:bg-zinc-800 cursor-pointer"
+                    >
+                        <ShoppingCart className="w-3 h-3 text-zinc-600" />
+                        <span className="truncate flex-1">{shop.name}</span>
+                    </div>
+                ))}
+                 {(!story.shops || story.shops.length === 0) && <div className="px-4 py-1 text-[10px] text-zinc-600">暂无商店</div>}
+             </div>
+        </SidebarSection>
+
+        {/* 6. Clues */}
         <SidebarSection 
             title="线索情报" 
             icon={<Search className="w-4 h-4 text-blue-500" />}
@@ -174,7 +197,7 @@ const Sidebar: React.FC = () => {
       </div>
       
       <div className="p-2 border-t border-zinc-800 text-[10px] text-zinc-600 text-center">
-         v0.4.0 Alpha
+         v0.6.0 Beta
       </div>
     </div>
   );
