@@ -1,5 +1,5 @@
 
-import { NarrativeNode, StoryAsset } from '../types';
+import { NarrativeNode, StoryAsset, AttributeDefinition, Clue, Item } from '../types';
 
 /**
  * 事件总线接口
@@ -67,18 +67,35 @@ export interface ICommandBus {
 
 /**
  * 变量存储接口
- * 管理游戏运行时的状态变量
+ * 管理游戏运行时的状态变量 (RPG State)
  */
 export interface IVariableStore {
   setEventBus(eventBus: IEventBus): void;
-  set(key: string, value: any): void;
-  get(key: string): any;
+  
+  // Initialization
+  init(story: StoryAsset): void;
+
+  // Generic Getters
   getAll(): Record<string, any>;
-  /**
-   * 评估条件表达式
-   * @param condition 表达式字符串，例如 "sanity > 50 && hasKey == true"
-   */
   evaluateCondition(condition: string): boolean;
+
+  // --- Attribute System ---
+  setAttribute(key: string, value: any): void;
+  getAttribute(key: string): any;
+  modifyAttribute(key: string, operator: 'add' | 'sub' | 'set', value: number): void;
+
+  // --- Inventory System ---
+  addItem(itemId: string, count?: number): void;
+  removeItem(itemId: string, count?: number): void;
+  getItemCount(itemId: string): number;
+  hasItem(itemId: string, count?: number): boolean;
+
+  // --- Knowledge System (Clues) ---
+  addClue(clueId: string, characterId?: string): void;
+  removeClue(clueId: string, characterId?: string): void;
+  shareClue(clueId: string, fromCharacterId: string, toCharacterId: string): void;
+  hasClue(clueId: string, characterId?: string): boolean;
+  isClueRevealed(clueId: string): boolean;
 }
 
 /**
@@ -108,5 +125,10 @@ export interface INarrativeEngine {
    */
   advance(choiceId?: string): NarrativeNode | null;
   
+  /**
+   * 触发交互事件 (Phase 2 ECA)
+   */
+  triggerEvent(trigger: string, targetId?: string): Promise<void>;
+
   getCurrentNode(): NarrativeNode | null;
 }

@@ -3,12 +3,14 @@ import { INarrativeEngine, IVariableStore, IEventBus, ISceneGraph } from './inte
 import { VariableStore } from './VariableStore';
 import { EventBus } from './EventBus';
 import { SceneGraph } from './SceneGraph';
-import { StoryAsset, SegmentAsset, NarrativeNode, Edge, NodeType, DialogueNode } from '../types';
+import { ActionExecutor } from './ActionExecutor';
+import { StoryAsset, SegmentAsset, NarrativeNode, Edge, NodeType, DialogueNode, ActionNode, LocationNode } from '../types';
 
 export class NarrativeEngine implements INarrativeEngine {
   public variableStore: IVariableStore;
   public eventBus: IEventBus;
   public sceneGraph: ISceneGraph;
+  private actionExecutor: ActionExecutor;
   
   private _story: StoryAsset | null = null;
   private _currentSegment: SegmentAsset | null = null;
@@ -19,10 +21,14 @@ export class NarrativeEngine implements INarrativeEngine {
     this.variableStore = new VariableStore();
     this.variableStore.setEventBus(this.eventBus);
     this.sceneGraph = new SceneGraph();
+    this.actionExecutor = new ActionExecutor(this.variableStore, this.eventBus);
   }
 
   loadStory(story: StoryAsset): void {
     this._story = story;
+    // Initialize RPG state
+    this.variableStore.init(story);
+    
     this.eventBus.emit('story:loaded', { storyId: story.id, title: story.title });
     console.log(`[NarrativeEngine] Story loaded: ${story.title}`);
   }
@@ -94,7 +100,7 @@ export class NarrativeEngine implements INarrativeEngine {
       // 线性节点（Location, 无选项Dialogue, Jump等），通常只有一个默认输出
       const candidates = outgoingEdges.filter(e => !e.sourceHandleId);
       
-      // 3. 检查条件 (Phase 1 基础支持)
+      // 3. 检查条件
       for (const edge of candidates) {
         if (edge.condition) {
           if (this.variableStore.evaluateCondition(edge.condition)) {
@@ -119,6 +125,28 @@ export class NarrativeEngine implements INarrativeEngine {
     }
   }
 
+  async triggerEvent(trigger: string, targetId?: string): Promise<void> {
+      if (!this._currentNodeId || !this._currentSegment) return;
+      const currentNode = this._currentSegment.nodes[this._currentNodeId];
+      if (!currentNode) return;
+
+      console.log(`[NarrativeEngine] Trigger: ${trigger} on ${currentNode.name}`);
+
+      // Handle Standardized Events (for ALL nodes)
+      // Filter by trigger type and optional targetId (e.g. for hotspots)
+      const matchingEvents = (currentNode.events || []).filter(e => {
+          if (e.trigger !== trigger) return false;
+          if (targetId && e.targetId !== targetId) return false;
+          return true;
+      });
+
+      for (const evt of matchingEvents) {
+          if (evt.actions && evt.actions.length > 0) {
+              await this.actionExecutor.executeGroup(evt.actions);
+          }
+      }
+  }
+
   getCurrentNode(): NarrativeNode | null {
     if (!this._currentSegment || !this._currentNodeId) return null;
     return this._currentSegment.nodes[this._currentNodeId] || null;
@@ -128,6 +156,8 @@ export class NarrativeEngine implements INarrativeEngine {
 
   private setCurrentNode(nodeId: string): NarrativeNode | null {
      if (this._currentNodeId) {
+         // Trigger exit event for previous node
+         this.triggerEvent('onExit'); 
          this.eventBus.emit('node:exit', { nodeId: this._currentNodeId });
      }
 
@@ -138,6 +168,22 @@ export class NarrativeEngine implements INarrativeEngine {
          this.eventBus.emit('node:enter', { nodeId: node.id, type: node.type, node });
          // Sync SceneGraph selection
          this.sceneGraph.selectNode(node.id);
+
+         // 1. Handle auto-trigger events (Lifecycle: onEnter)
+         this.triggerEvent('onEnter');
+
+         // 2. Handle ACTION Nodes (Auto-execute and advance)
+         if (node.type === NodeType.ACTION) {
+             const actionNode = node as ActionNode;
+             if (actionNode.actions && actionNode.actions.length > 0) {
+                 this.actionExecutor.executeGroup(actionNode.actions).then(() => {
+                     // Auto-advance after actions complete
+                     setTimeout(() => this.advance(), 100);
+                 });
+             } else {
+                 setTimeout(() => this.advance(), 100);
+             }
+         }
      }
 
      return node;

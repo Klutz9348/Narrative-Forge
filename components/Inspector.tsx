@@ -1,9 +1,10 @@
 
 import React, { useState } from 'react';
 import { MousePointer2, MoreVertical, Wand2, Plus, Trash2, ArrowRightCircle, Mic, Music, LayoutTemplate, Settings2, Code, Split, Zap, PlayCircle, StopCircle, Target, Clapperboard, Timer, Smartphone, MessageSquare, ImageIcon, Play, Gauge, Package, MinusCircle, ChevronDown, ChevronRight, Vote, Search, Share2, ShoppingCart } from 'lucide-react';
-import { NodeType, DialogueNode, BranchNode, VariableSetterNode, JumpNode, LocationNode, NodeEvent, Hotspot, ActionNode, ScriptActionType, ScriptAction, LogicOperator, VariableType, VoteNode } from '../types';
+import { NodeType, DialogueNode, BranchNode, JumpNode, LocationNode, NodeEvent, Hotspot, ActionNode, ScriptActionType, ScriptAction, LogicOperator, VariableType, VoteNode } from '../types';
 import * as GeminiService from '../services/geminiService';
 import { useEditorStore } from '../store/useEditorStore';
+import { ACTION_REGISTRY, ParamConfig } from '../engine/Registry';
 
 const NODE_TYPE_LABELS: Record<NodeType, string> = {
   [NodeType.START]: '开始 (Start)',
@@ -11,7 +12,6 @@ const NODE_TYPE_LABELS: Record<NodeType, string> = {
   [NodeType.LOCATION]: '场景 (Location)',
   [NodeType.BRANCH]: '逻辑分支 (Branch)',
   [NodeType.JUMP]: '章节跳转 (Jump)',
-  [NodeType.SET_VARIABLE]: '设置变量 (Set Var)',
   [NodeType.ACTION]: '动作序列 (Action Script)',
   [NodeType.VOTE]: '投票 (Vote)',
 };
@@ -31,30 +31,27 @@ const ADDON_DEFINITIONS: Record<NodeType, { key: string; label: string; icon: Re
   [NodeType.BRANCH]: [
     { key: 'defaultNextNodeId', label: '默认路径 (Else Path)', icon: <Split className="w-3 h-3"/>, defaultValue: '' }
   ],
-  [NodeType.SET_VARIABLE]: [
-    { key: 'isAdvanced', label: '高级模式 (Advanced)', icon: <Code className="w-3 h-3"/>, defaultValue: true }
-  ],
   [NodeType.JUMP]: [],
   [NodeType.ACTION]: [],
   [NodeType.VOTE]: []
 };
 
-// Action Definitions for Script Actions
-const SCRIPT_ACTIONS: Record<ScriptActionType, { label: string; icon: React.ReactNode; color: string }> = {
-  [ScriptActionType.UPDATE_ATTRIBUTE]: { label: '修改属性 (Attr)', icon: <Gauge className="w-3 h-3" />, color: 'text-purple-400' },
-  [ScriptActionType.ADD_ITEM]: { label: '添加物品 (Add Item)', icon: <Package className="w-3 h-3" />, color: 'text-amber-400' },
-  [ScriptActionType.REMOVE_ITEM]: { label: '移除物品 (Remove Item)', icon: <MinusCircle className="w-3 h-3" />, color: 'text-red-400' },
-  [ScriptActionType.PLAY_SOUND]: { label: '播放音效 (Sound)', icon: <Zap className="w-3 h-3" />, color: 'text-pink-400' },
-  [ScriptActionType.WAIT]: { label: '等待 (Wait)', icon: <Timer className="w-3 h-3" />, color: 'text-blue-400' },
-  [ScriptActionType.SCREEN_SHAKE]: { label: '屏幕震动 (Shake)', icon: <Smartphone className="w-3 h-3" />, color: 'text-orange-400' },
-  [ScriptActionType.SHOW_TOAST]: { label: '显示提示 (Toast)', icon: <MessageSquare className="w-3 h-3" />, color: 'text-green-400' },
-  // Phase 3 Actions
-  [ScriptActionType.ADD_CLUE]: { label: '获得线索 (Get Clue)', icon: <Search className="w-3 h-3" />, color: 'text-cyan-400' },
-  [ScriptActionType.REMOVE_CLUE]: { label: '失去线索 (Lost Clue)', icon: <Search className="w-3 h-3" />, color: 'text-zinc-400' },
-  [ScriptActionType.SHARE_CLUE]: { label: '分享线索 (Share)', icon: <Share2 className="w-3 h-3" />, color: 'text-indigo-400' },
-  // Phase 4 Actions
-  [ScriptActionType.OPEN_SHOP]: { label: '打开商店 (Open Shop)', icon: <ShoppingCart className="w-3 h-3" />, color: 'text-emerald-400' },
-  [ScriptActionType.OPEN_CRAFTING]: { label: '打开合成 (Open Crafting)', icon: <Package className="w-3 h-3" />, color: 'text-amber-500' },
+// Helper to resolve icons from string name (Simple map for now, could be dynamic)
+const getIcon = (name?: string, colorClass?: string) => {
+    const className = `w-3 h-3 ${colorClass || ''}`;
+    switch(name) {
+        case 'Gauge': return <Gauge className={className} />;
+        case 'Package': return <Package className={className} />;
+        case 'MinusCircle': return <MinusCircle className={className} />;
+        case 'Search': return <Search className={className} />;
+        case 'Share2': return <Share2 className={className} />;
+        case 'ShoppingCart': return <ShoppingCart className={className} />;
+        case 'Zap': return <Zap className={className} />;
+        case 'Timer': return <Timer className={className} />;
+        case 'Smartphone': return <Smartphone className={className} />;
+        case 'MessageSquare': return <MessageSquare className={className} />;
+        default: return <Zap className={className} />;
+    }
 };
 
 const OPERATORS_BY_TYPE: Record<VariableType, LogicOperator[]> = {
@@ -63,7 +60,7 @@ const OPERATORS_BY_TYPE: Record<VariableType, LogicOperator[]> = {
   'string': ['==', '!=', 'contains']
 };
 
-// --- Reusable Action Stack Editor ---
+// --- Reusable Action Stack Editor (Registry Driven) ---
 const ActionStackEditor: React.FC<{
   actions: ScriptAction[];
   onChange: (actions: ScriptAction[]) => void;
@@ -92,16 +89,81 @@ const ActionStackEditor: React.FC<{
     onChange(actions.map(a => a.id === id ? { ...a, params: { ...a.params, [key]: value } } : a));
   };
 
+  const renderInput = (param: ParamConfig, value: any, onChange: (val: any) => void) => {
+      const commonClasses = "bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300 text-xs w-full focus:outline-none focus:border-indigo-500";
+      
+      if (param.type === 'select' && param.options) {
+          return (
+              <select 
+                className={commonClasses}
+                value={value || param.defaultValue || ''}
+                onChange={(e) => onChange(e.target.value)}
+                onBlur={onBlur}
+              >
+                  {param.options.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+          );
+      }
+
+      if (param.type === 'entity') {
+          let options: {id: string, name: string}[] = [];
+          if (param.entityType === 'character') options = story.characters;
+          if (param.entityType === 'item') options = story.items;
+          if (param.entityType === 'clue') options = story.clues;
+          if (param.entityType === 'attribute') options = story.attributes;
+          if (param.entityType === 'shop') options = story.shops || [];
+
+          return (
+              <select 
+                className={commonClasses}
+                value={value || ''}
+                onChange={(e) => onChange(e.target.value)}
+                onBlur={onBlur}
+              >
+                  <option value="">-- Select {param.entityType} --</option>
+                  {options.map(opt => <option key={opt.id} value={opt.id}>{opt.name}</option>)}
+              </select>
+          );
+      }
+
+      if (param.type === 'number') {
+          return (
+              <input 
+                type="number"
+                className={commonClasses}
+                value={value !== undefined ? value : (param.defaultValue || '')}
+                onChange={(e) => onChange(parseFloat(e.target.value))}
+                onBlur={onBlur}
+                placeholder={param.placeholder}
+              />
+          );
+      }
+
+      // Default String
+      return (
+          <input 
+            type="text"
+            className={commonClasses}
+            value={value || ''}
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={onBlur}
+            placeholder={param.placeholder}
+          />
+      );
+  };
+
   return (
     <div className="space-y-2">
       {actions.map((action, idx) => {
-        const def = SCRIPT_ACTIONS[action.type];
+        const def = ACTION_REGISTRY[action.type];
+        if (!def) return <div key={action.id} className="text-red-500 text-xs">Unknown Action: {action.type}</div>;
+
         return (
           <div key={action.id} className="bg-zinc-800/80 border border-zinc-700/50 rounded p-2 text-xs relative group">
              {/* Header */}
              <div className="flex items-center gap-2 mb-2">
                <span className="font-mono text-zinc-600 w-4 text-center">{idx + 1}</span>
-               <div className={`${def.color}`}>{def.icon}</div>
+               {getIcon(def.iconName, def.colorClass)}
                <span className="font-bold text-zinc-300">{def.label}</span>
                <button onClick={() => removeAction(action.id)} className="absolute top-2 right-2 text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity">
                  <Trash2 className="w-3 h-3" />
@@ -110,159 +172,12 @@ const ActionStackEditor: React.FC<{
 
              {/* Dynamic Params Form */}
              <div className="pl-6 space-y-2">
-                {action.type === ScriptActionType.UPDATE_ATTRIBUTE && (
-                  <div className="grid grid-cols-1 gap-1">
-                     <select 
-                        className="bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300"
-                        value={action.params.attributeId || ''}
-                        onChange={(e) => updateActionParam(action.id, 'attributeId', e.target.value)}
-                        onBlur={onBlur}
-                     >
-                        <option value="">-- 选择属性 --</option>
-                        {story.attributes.map(attr => <option key={attr.id} value={attr.id}>{attr.name}</option>)}
-                     </select>
-                     <div className="flex gap-1">
-                        <select 
-                          className="w-16 bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300"
-                          value={action.params.op || 'set'}
-                          onChange={(e) => updateActionParam(action.id, 'op', e.target.value)}
-                          onBlur={onBlur}
-                        >
-                          <option value="set">=</option>
-                          <option value="add">+</option>
-                          <option value="sub">-</option>
-                        </select>
-                        <input 
-                          type="number" 
-                          placeholder="Value"
-                          className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300"
-                          value={action.params.value || ''}
-                          onChange={(e) => updateActionParam(action.id, 'value', parseFloat(e.target.value))}
-                          onBlur={onBlur}
-                        />
-                     </div>
-                  </div>
-                )}
-
-                {(action.type === ScriptActionType.ADD_ITEM || action.type === ScriptActionType.REMOVE_ITEM) && (
-                   <div className="flex gap-1">
-                      <select 
-                        className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300"
-                        value={action.params.itemId || ''}
-                        onChange={(e) => updateActionParam(action.id, 'itemId', e.target.value)}
-                        onBlur={onBlur}
-                      >
-                        <option value="">-- 选择物品 --</option>
-                        {story.items.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
-                      </select>
-                      <input 
-                        type="number"
-                        className="w-12 bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-center text-zinc-300"
-                        placeholder="Qty"
-                        defaultValue={1}
-                        value={action.params.count || 1}
-                        onChange={(e) => updateActionParam(action.id, 'count', parseFloat(e.target.value))}
-                        onBlur={onBlur}
-                      />
-                   </div>
-                )}
-
-                {/* CLUE ACTIONS */}
-                {(action.type === ScriptActionType.ADD_CLUE || action.type === ScriptActionType.REMOVE_CLUE) && (
-                    <div className="space-y-1">
-                        <select 
-                            className="w-full bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300"
-                            value={action.params.characterId || ''}
-                            onChange={(e) => updateActionParam(action.id, 'characterId', e.target.value)}
-                            onBlur={onBlur}
-                        >
-                            <option value="">-- 目标角色 --</option>
-                            {story.characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                        </select>
-                        <select 
-                            className="w-full bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300"
-                            value={action.params.clueId || ''}
-                            onChange={(e) => updateActionParam(action.id, 'clueId', e.target.value)}
-                            onBlur={onBlur}
-                        >
-                            <option value="">-- 选择线索 --</option>
-                            {story.clues.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                        </select>
+                {def.params.map(param => (
+                    <div key={param.name} className="flex flex-col gap-1">
+                        {param.label && <label className="text-[10px] text-zinc-500 uppercase">{param.label}</label>}
+                        {renderInput(param, action.params[param.name], (val) => updateActionParam(action.id, param.name, val))}
                     </div>
-                )}
-
-                {action.type === ScriptActionType.SHARE_CLUE && (
-                    <div className="space-y-1">
-                        <div className="flex gap-1">
-                            <select 
-                                className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300"
-                                value={action.params.fromCharacterId || ''}
-                                onChange={(e) => updateActionParam(action.id, 'fromCharacterId', e.target.value)}
-                                onBlur={onBlur}
-                            >
-                                <option value="">From...</option>
-                                {story.characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                            </select>
-                            <span className="text-zinc-500 self-center">to</span>
-                            <select 
-                                className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300"
-                                value={action.params.toCharacterId || ''}
-                                onChange={(e) => updateActionParam(action.id, 'toCharacterId', e.target.value)}
-                                onBlur={onBlur}
-                            >
-                                <option value="">To...</option>
-                                {story.characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                            </select>
-                        </div>
-                        <select 
-                            className="w-full bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300"
-                            value={action.params.clueId || ''}
-                            onChange={(e) => updateActionParam(action.id, 'clueId', e.target.value)}
-                            onBlur={onBlur}
-                        >
-                            <option value="">-- 选择线索 --</option>
-                            {story.clues.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                        </select>
-                    </div>
-                )}
-
-                {/* SHOP ACTION */}
-                {action.type === ScriptActionType.OPEN_SHOP && (
-                    <select 
-                        className="w-full bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300"
-                        value={action.params.shopId || ''}
-                        onChange={(e) => updateActionParam(action.id, 'shopId', e.target.value)}
-                        onBlur={onBlur}
-                    >
-                        <option value="">-- 选择商店 --</option>
-                        {(story.shops || []).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                )}
-
-                {action.type === ScriptActionType.SHOW_TOAST && (
-                   <input 
-                      type="text"
-                      className="w-full bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300"
-                      placeholder="Message..."
-                      value={action.params.message || ''}
-                      onChange={(e) => updateActionParam(action.id, 'message', e.target.value)}
-                      onBlur={onBlur}
-                   />
-                )}
-
-                {action.type === ScriptActionType.WAIT && (
-                   <div className="flex items-center gap-2">
-                      <input 
-                        type="number"
-                        className="w-full bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300"
-                        placeholder="Seconds"
-                        value={action.params.duration || ''}
-                        onChange={(e) => updateActionParam(action.id, 'duration', parseFloat(e.target.value))}
-                        onBlur={onBlur}
-                      />
-                      <span className="text-zinc-500">sec</span>
-                   </div>
-                )}
+                ))}
              </div>
           </div>
         );
@@ -277,19 +192,19 @@ const ActionStackEditor: React.FC<{
             <Plus className="w-3 h-3" /> 添加指令
           </button>
         ) : (
-          <div className="bg-zinc-800 border border-zinc-700 rounded shadow-xl py-1 z-50">
-             <div className="text-[10px] uppercase font-bold text-zinc-500 px-2 py-1 bg-zinc-900/50 flex justify-between">
+          <div className="bg-zinc-800 border border-zinc-700 rounded shadow-xl py-1 z-50 max-h-60 overflow-y-auto">
+             <div className="text-[10px] uppercase font-bold text-zinc-500 px-2 py-1 bg-zinc-900/50 flex justify-between sticky top-0">
                 <span>Select Action</span>
                 <button onClick={() => setShowMenu(false)}><Plus className="w-3 h-3 rotate-45" /></button>
              </div>
-             {Object.values(ScriptActionType).map(type => (
+             {Object.values(ACTION_REGISTRY).map(def => (
                <button 
-                 key={type} 
-                 onClick={() => addAction(type)} 
+                 key={def.type} 
+                 onClick={() => addAction(def.type)} 
                  className="w-full text-left px-2 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700 flex items-center gap-2 transition-colors"
                >
-                 <div className={SCRIPT_ACTIONS[type].color}>{SCRIPT_ACTIONS[type].icon}</div>
-                 {SCRIPT_ACTIONS[type].label}
+                 {getIcon(def.iconName, def.colorClass)}
+                 {def.label}
                </button>
              ))}
           </div>
@@ -369,13 +284,15 @@ const Inspector: React.FC = () => {
   };
 
   const addEvent = (trigger: 'onEnter' | 'onExit' | 'onClick', targetId?: string) => {
-    if (!selectedNode || selectedNode.type !== NodeType.LOCATION) return;
-    const locNode = selectedNode as LocationNode;
+    if (!selectedNode) return;
     
     let label: string = trigger;
     if (trigger === 'onClick' && targetId) {
-      const hs = locNode.hotspots?.find(h => h.id === targetId);
-      label = `Click: ${hs?.name || 'Unknown'}`;
+      // Only Location nodes have hotspots
+      if (selectedNode.type === NodeType.LOCATION) {
+          const hs = (selectedNode as LocationNode).hotspots?.find(h => h.id === targetId);
+          label = `Click: ${hs?.name || 'Unknown'}`;
+      }
     } else if (trigger === 'onEnter') {
       label = '进入时 (On Enter)';
     } else if (trigger === 'onExit') {
@@ -391,8 +308,8 @@ const Inspector: React.FC = () => {
       actions: []
     };
 
-    startEditing(locNode.id);
-    updateNode(locNode.id, { events: [...(locNode.events || []), newEvent] });
+    startEditing(selectedNode.id);
+    updateNode(selectedNode.id, { events: [...(selectedNode.events || []), newEvent] });
     commitEditing();
     setShowEventMenu(false);
     setExpandedEventId(newEvent.id); // Auto expand new event
@@ -684,8 +601,11 @@ const Inspector: React.FC = () => {
                 )}
               </div>
             </div>
+          </div>
+        )}
 
-            {/* Event Manager (Updated for ECA) */}
+        {/* Event Manager (Now available for ALL nodes that support events, primarily Location but extendable) */}
+        {(selectedNode.type === NodeType.LOCATION) && (
             <div>
                <div className="flex justify-between items-center mb-1.5">
                   <label className="text-[10px] text-zinc-500 uppercase font-semibold">事件与逻辑 (Logic Events)</label>
@@ -713,7 +633,7 @@ const Inspector: React.FC = () => {
                </div>
                
                <div className="space-y-1.5">
-                  {(selectedNode as LocationNode).events?.map(evt => {
+                  {selectedNode.events?.map(evt => {
                     const isExpanded = expandedEventId === evt.id;
                     return (
                         <div key={evt.id} className="bg-zinc-800 rounded border border-zinc-700 overflow-hidden">
@@ -731,9 +651,9 @@ const Inspector: React.FC = () => {
                                 <button 
                                     onClick={(e) => {
                                         e.stopPropagation();
-                                        const node = selectedNode as LocationNode;
-                                        startEditing(node.id);
-                                        updateNode(node.id, { events: node.events.filter(e => e.id !== evt.id) });
+                                        startEditing(selectedNode.id);
+                                        const newEvents = (selectedNode.events || []).filter(e => e.id !== evt.id);
+                                        updateNode(selectedNode.id, { events: newEvents });
                                         commitEditing();
                                     }}
                                     className="text-zinc-600 hover:text-red-400 p-1"
@@ -748,10 +668,9 @@ const Inspector: React.FC = () => {
                                     <ActionStackEditor 
                                         actions={evt.actions || []}
                                         onChange={(newActions) => {
-                                            const node = selectedNode as LocationNode;
-                                            startEditing(node.id);
-                                            const newEvents = node.events.map(e => e.id === evt.id ? { ...e, actions: newActions } : e);
-                                            updateNode(node.id, { events: newEvents });
+                                            startEditing(selectedNode.id);
+                                            const newEvents = (selectedNode.events || []).map(e => e.id === evt.id ? { ...e, actions: newActions } : e);
+                                            updateNode(selectedNode.id, { events: newEvents });
                                         }}
                                         onBlur={commitEditing}
                                     />
@@ -760,15 +679,13 @@ const Inspector: React.FC = () => {
                         </div>
                     );
                   })}
-                  {!((selectedNode as LocationNode).events?.length) && (
+                  {!((selectedNode.events?.length)) && (
                      <div className="text-[10px] text-zinc-600 italic text-center p-2 border border-dashed border-zinc-800 rounded">
                        暂无事件
                      </div>
                   )}
                </div>
             </div>
-
-          </div>
         )}
 
         {selectedNode.type === NodeType.BRANCH && (
@@ -905,7 +822,7 @@ const Inspector: React.FC = () => {
            </div>
         )}
 
-        {/* Vote Node Editor (NEW) */}
+        {/* Vote Node Editor */}
         {selectedNode.type === NodeType.VOTE && (
             <div className="space-y-4">
                 {/* 1. Question Title */}

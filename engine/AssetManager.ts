@@ -47,7 +47,8 @@ export class AssetManager {
       name: 'Node', // Default name, overridden below
       position,
       size: { x: 300, y: 200 },
-      parentId: undefined
+      parentId: undefined,
+      events: [] // Initialize standardized event array
     };
 
     switch (type) {
@@ -56,11 +57,9 @@ export class AssetManager {
       case NodeType.DIALOGUE:
         return { ...base, name: 'Dialogue', characterId: '', text: '...', choices: [] } as any;
       case NodeType.LOCATION:
-        return { ...base, name: 'Location', backgroundImage: '', hotspots: [], events: [] } as any;
+        return { ...base, name: 'Location', backgroundImage: '', hotspots: [] } as any;
       case NodeType.BRANCH:
         return { ...base, name: 'Logic Branch', conditions: [] } as any;
-      case NodeType.SET_VARIABLE:
-        return { ...base, name: 'Set Variable', variableName: 'new_var', operator: 'SET', value: '0', size: { x: 250, y: 150 } } as any;
       case NodeType.JUMP:
         return { ...base, name: 'Jump to...', targetSegmentId: '', size: { x: 250, y: 120 } } as any;
       case NodeType.ACTION:

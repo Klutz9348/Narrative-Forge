@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { MousePointer2, Type, Image as ImageIcon, ZoomIn, ZoomOut, GitGraph, Variable, ArrowRightCircle, ChevronDown, Layers, Zap, Clapperboard, Timer, Smartphone, MessageSquare, Play, Package, Vote } from 'lucide-react';
-import { NodeType, NarrativeNode, Vector2, DialogueNode, BranchNode, VariableSetterNode, JumpNode, LocationNode, ActionNode, Hotspot, ScriptActionType, VoteNode } from '../types';
+import { MousePointer2, Type, Image as ImageIcon, ZoomIn, ZoomOut, GitGraph, ArrowRightCircle, ChevronDown, Layers, Zap, Clapperboard, Timer, Smartphone, MessageSquare, Play, Package, Vote, Variable } from 'lucide-react';
+import { NodeType, NarrativeNode, Vector2, DialogueNode, BranchNode, JumpNode, LocationNode, ActionNode, Hotspot, ScriptActionType, VoteNode } from '../types';
 import { useEditorStore } from '../store/useEditorStore';
 
 // Bezier Curve Helper
@@ -72,7 +72,9 @@ const NodeComponent: React.FC<NodeComponentProps> = React.memo(({
     const hasChoices = isDialogue && (node as DialogueNode).choices && (node as DialogueNode).choices.length > 0;
     const hasVoteOptions = isVote && (node as VoteNode).voteConfig?.options?.length > 0;
     
-    const showDefaultHandle = !isBranch && !isLocation && !hasChoices && !hasVoteOptions;
+    // Only show default handle if there are NO specific output handles (choices, events etc)
+    const hasEvents = node.events && node.events.length > 0;
+    const showDefaultHandle = !isBranch && !hasEvents && !hasChoices && !hasVoteOptions;
     const showInputHandle = !isStart; // Start node has no input
 
     return (
@@ -534,14 +536,18 @@ const Canvas: React.FC = () => {
                      return { x: node.position.x + node.size.x - 2, y: node.position.y + offsetFromTop };
                 }
             }
-            if (node.type === NodeType.LOCATION && handleId) {
-                 const events = (node as LocationNode).events || [];
+            
+            // GENERIC EVENT HANDLES (Location, etc)
+            if (node.events && handleId) {
+                 const events = node.events || [];
                  const eventIndex = events.findIndex(e => e.id === handleId);
-                 if (eventIndex === -1) return { x: node.position.x + node.size.x, y: node.position.y };
-                 const reverseIndex = events.length - 1 - eventIndex;
-                 const offsetFromBottom = BORDER + PADDING + (reverseIndex * (ITEM_HEIGHT + ITEM_GAP)) + (ITEM_HEIGHT / 2);
-                 return { x: node.position.x + node.size.x - 2, y: node.position.y + node.size.y - offsetFromBottom };
+                 if (eventIndex !== -1) {
+                     const reverseIndex = events.length - 1 - eventIndex;
+                     const offsetFromBottom = BORDER + PADDING + (reverseIndex * (ITEM_HEIGHT + ITEM_GAP)) + (ITEM_HEIGHT / 2);
+                     return { x: node.position.x + node.size.x - 2, y: node.position.y + node.size.y - offsetFromBottom };
+                 }
             }
+
             // VOTE NODE
             if (node.type === NodeType.VOTE && handleId) {
                 const options = (node as VoteNode).voteConfig.options;
@@ -678,13 +684,15 @@ const Canvas: React.FC = () => {
         }
       }
 
-      if (node.type === NodeType.LOCATION && handleId) {
-         const events = (node as LocationNode).events || [];
+      // Generic Event Handle Support
+      if (node.events && handleId) {
+         const events = node.events || [];
          const eventIndex = events.findIndex(e => e.id === handleId);
-         if (eventIndex === -1) return { x: node.position.x + node.size.x, y: node.position.y };
-         const reverseIndex = events.length - 1 - eventIndex;
-         const offsetFromBottom = BORDER + PADDING + (reverseIndex * (ITEM_HEIGHT + ITEM_GAP)) + (ITEM_HEIGHT / 2);
-         return { x: node.position.x + node.size.x - 2, y: node.position.y + node.size.y - offsetFromBottom };
+         if (eventIndex !== -1) {
+             const reverseIndex = events.length - 1 - eventIndex;
+             const offsetFromBottom = BORDER + PADDING + (reverseIndex * (ITEM_HEIGHT + ITEM_GAP)) + (ITEM_HEIGHT / 2);
+             return { x: node.position.x + node.size.x - 2, y: node.position.y + node.size.y - offsetFromBottom };
+         }
       }
 
       if (node.type === NodeType.VOTE && handleId) {
@@ -709,18 +717,22 @@ const Canvas: React.FC = () => {
     const isSelected = selectedIds.includes(node.id);
     const { ITEM_HEIGHT, ITEM_GAP } = LAYOUT;
 
+    // Render content based on type, then append Events if any
+    let content: React.ReactNode = null;
+
     switch (node.type) {
       case NodeType.START:
-        return (
+        content = (
           <div className="flex flex-col justify-center h-full">
             <div className="text-[10px] text-emerald-300 text-center opacity-80">
               Entry point
             </div>
           </div>
         );
+        break;
 
       case NodeType.DIALOGUE:
-        return (
+        content = (
           <>
             <div className="font-bold text-zinc-500 mb-1 shrink-0">
               {story.characters.find(c => c.id === (node as DialogueNode).characterId)?.name}
@@ -743,10 +755,11 @@ const Canvas: React.FC = () => {
             </div>
           </>
         );
+        break;
       
       case NodeType.LOCATION:
         const locNode = node as LocationNode;
-        return (
+        content = (
           <div className="flex flex-col h-full">
             <div className="w-full aspect-video shrink-0 relative bg-zinc-900 rounded border border-zinc-700/50 overflow-hidden group/image select-none">
                 {locNode.backgroundImage ? (
@@ -794,32 +807,13 @@ const Canvas: React.FC = () => {
                    </div>
                 ))}
             </div>
-            
-            {/* Event List */}
-            {locNode.events && locNode.events.length > 0 ? (
-               <div className="flex flex-col mt-[4px] shrink-0" style={{ gap: ITEM_GAP }}>
-                 {locNode.events.map(evt => (
-                    <div key={evt.id} className="relative flex items-center justify-between shrink-0" style={{ height: ITEM_HEIGHT }}>
-                       <div className="flex items-center gap-1.5 px-2 bg-black/20 border border-zinc-700 rounded h-full w-full">
-                          <Zap className={`w-3 h-3 ${evt.trigger === 'onClick' ? 'text-amber-400' : 'text-indigo-400'}`} />
-                          <span className="text-[10px] text-zinc-300 truncate">{evt.label}</span>
-                       </div>
-                       <div 
-                          className="absolute -right-[18px] top-1/2 -translate-y-1/2 w-3 h-3 bg-zinc-500 border border-zinc-900 rounded-full hover:scale-125 transition-transform cursor-crosshair z-20"
-                          onMouseDown={(e) => handleHandleMouseDown(e, node.id, evt.id)}
-                        />
-                    </div>
-                 ))}
-               </div>
-            ) : (
-               <div className="p-1 text-center text-[10px] text-zinc-500 shrink-0 opacity-50">No Events</div>
-            )}
           </div>
         );
+        break;
 
       case NodeType.BRANCH:
         const branchNode = node as BranchNode;
-        return (
+        content = (
           <div className="flex flex-col h-full">
             <div className="text-[10px] text-zinc-500 mb-[8px] italic leading-[16px] h-[16px] block shrink-0 whitespace-nowrap overflow-hidden">Evaluation Order:</div>
             
@@ -858,25 +852,12 @@ const Canvas: React.FC = () => {
             </div>
           </div>
         );
-
-      case NodeType.SET_VARIABLE:
-        const setVarNode = node as VariableSetterNode;
-        return (
-          <div className="flex flex-col justify-center h-full space-y-2">
-             <div className="flex items-center gap-2 bg-black/20 p-1 rounded border border-purple-500/20">
-               <span className="text-purple-400 font-mono">{setVarNode.variableName}</span>
-             </div>
-             <div className="text-center font-bold text-zinc-500 text-[10px]">{setVarNode.operator}</div>
-             <div className="flex items-center gap-2 bg-black/20 p-1 rounded border border-zinc-700">
-               <span className="text-zinc-300 font-mono">{setVarNode.value}</span>
-             </div>
-          </div>
-        );
+        break;
       
       case NodeType.JUMP:
         const jumpNode = node as JumpNode;
         const targetSeg = story.segments.find(s => s.id === jumpNode.targetSegmentId);
-        return (
+        content = (
           <div className="flex items-center justify-center h-full">
             <div className="flex items-center gap-2 text-rose-300 bg-rose-900/20 px-3 py-2 rounded-full border border-rose-500/30">
                <ArrowRightCircle className="w-4 h-4" />
@@ -886,11 +867,12 @@ const Canvas: React.FC = () => {
             </div>
           </div>
         );
+        break;
 
       case NodeType.ACTION:
         const actionNode = node as ActionNode;
         const actions = actionNode.actions || [];
-        return (
+        content = (
           <div className="flex flex-col h-full overflow-hidden">
              <div className="flex-1 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
                 {actions.map((cmd, idx) => {
@@ -924,11 +906,12 @@ const Canvas: React.FC = () => {
              </div>
           </div>
         );
+        break;
 
       case NodeType.VOTE:
         const voteNode = node as VoteNode;
         const config = voteNode.voteConfig || { title: 'Vote', duration: 30, options: [] };
-        return (
+        content = (
           <div className="flex flex-col h-full">
              <div className="font-bold text-violet-400 mb-1 shrink-0 flex items-center justify-between">
                 <span>{config.title}</span>
@@ -954,10 +937,36 @@ const Canvas: React.FC = () => {
              </div>
           </div>
         );
+        break;
 
       default:
-        return <div className="text-zinc-500 text-center mt-4">Unknown Node</div>;
+        content = <div className="text-zinc-500 text-center mt-4">Unknown Node</div>;
     }
+
+    // Append Event list to content if events exist
+    if (node.events && node.events.length > 0) {
+        return (
+            <div className="flex flex-col h-full">
+                <div className="flex-1">{content}</div>
+                <div className="flex flex-col mt-[4px] shrink-0 border-t border-zinc-700/30 pt-1" style={{ gap: ITEM_GAP }}>
+                 {node.events.map(evt => (
+                    <div key={evt.id} className="relative flex items-center justify-between shrink-0" style={{ height: ITEM_HEIGHT }}>
+                       <div className="flex items-center gap-1.5 px-2 bg-black/20 border border-zinc-700 rounded h-full w-full">
+                          <Zap className={`w-3 h-3 ${evt.trigger === 'onClick' ? 'text-amber-400' : 'text-indigo-400'}`} />
+                          <span className="text-[10px] text-zinc-300 truncate">{evt.label}</span>
+                       </div>
+                       <div 
+                          className="absolute -right-[18px] top-1/2 -translate-y-1/2 w-3 h-3 bg-zinc-500 border border-zinc-900 rounded-full hover:scale-125 transition-transform cursor-crosshair z-20"
+                          onMouseDown={(e) => handleHandleMouseDown(e, node.id, evt.id)}
+                        />
+                    </div>
+                 ))}
+               </div>
+            </div>
+        );
+    }
+
+    return content;
   };
 
   const getNodeColorClass = useCallback((type: NodeType) => {
@@ -965,7 +974,6 @@ const Canvas: React.FC = () => {
       case NodeType.START: return 'bg-emerald-800/80 text-white';
       case NodeType.LOCATION: return 'bg-emerald-900/50 text-emerald-400';
       case NodeType.BRANCH: return 'bg-amber-900/50 text-amber-400';
-      case NodeType.SET_VARIABLE: return 'bg-purple-900/50 text-purple-400';
       case NodeType.JUMP: return 'bg-rose-900/50 text-rose-400';
       case NodeType.ACTION: return 'bg-slate-900/80 text-cyan-400';
       case NodeType.VOTE: return 'bg-violet-900/80 text-violet-300';
@@ -978,7 +986,6 @@ const Canvas: React.FC = () => {
       case NodeType.START: return <Play className="w-3 h-3 fill-current" />;
       case NodeType.LOCATION: return <ImageIcon className="w-3 h-3" />;
       case NodeType.BRANCH: return <GitGraph className="w-3 h-3" />;
-      case NodeType.SET_VARIABLE: return <Variable className="w-3 h-3" />;
       case NodeType.JUMP: return <ArrowRightCircle className="w-3 h-3" />;
       case NodeType.ACTION: return <Clapperboard className="w-3 h-3" />;
       case NodeType.VOTE: return <Vote className="w-3 h-3" />;
@@ -1136,15 +1143,6 @@ const Canvas: React.FC = () => {
               >
                 <GitGraph className="w-4 h-4" />
                 <span className="text-xs">分支判断</span>
-              </button>
-               <button 
-                draggable
-                onDragStart={(e) => onDragStart(e, NodeType.SET_VARIABLE)}
-                className="flex items-center gap-2 p-2 hover:bg-zinc-700 rounded text-zinc-300 hover:text-purple-400 text-left w-full cursor-grab active:cursor-grabbing"
-                onClick={() => handleAddNode(NodeType.SET_VARIABLE)}
-              >
-                <Variable className="w-4 h-4" />
-                <span className="text-xs">变量设置</span>
               </button>
                <button 
                 draggable

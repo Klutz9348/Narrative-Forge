@@ -5,14 +5,13 @@ export type Vector2 = { x: number; y: number };
 // --- Asset Layer ---
 
 export enum NodeType {
-  START = 'START', // New: Entry point
+  START = 'START',
   DIALOGUE = 'DIALOGUE',
   LOCATION = 'LOCATION',
   BRANCH = 'BRANCH',
   JUMP = 'JUMP',
-  SET_VARIABLE = 'SET_VARIABLE', // Deprecated in favor of ActionNode logic, but kept for compatibility
   ACTION = 'ACTION', 
-  VOTE = 'VOTE', // New: Multiplayer Vote
+  VOTE = 'VOTE',
 }
 
 export interface NodeData {
@@ -21,8 +20,11 @@ export interface NodeData {
   name: string;
   position: Vector2;
   size: Vector2;
-  parentId?: string; // Hierarchical support
+  parentId?: string;
   childrenIds?: string[]; 
+  
+  // New: Standardized Event Interface for ALL nodes
+  events?: NodeEvent[];
 }
 
 export interface StartNode extends NodeData {
@@ -90,7 +92,7 @@ export interface LocationNode extends NodeData {
   type: NodeType.LOCATION;
   backgroundImage: string;
   hotspots: Hotspot[]; 
-  events: NodeEvent[]; 
+  // events moved to NodeData
   bgm?: string;
   filter?: string;
 }
@@ -172,14 +174,6 @@ export interface BranchNode extends NodeData {
   defaultNextNodeId?: string; 
 }
 
-export interface VariableSetterNode extends NodeData {
-  type: NodeType.SET_VARIABLE;
-  variableName: string;   
-  operator: 'SET' | 'ADD' | 'SUB'; 
-  value: string;          
-  isAdvanced?: boolean; 
-}
-
 export interface JumpNode extends NodeData {
   type: NodeType.JUMP;
   targetSegmentId: string; 
@@ -215,7 +209,6 @@ export type NarrativeNode =
   | DialogueNode 
   | LocationNode 
   | BranchNode 
-  | VariableSetterNode 
   | JumpNode 
   | ActionNode
   | VoteNode
