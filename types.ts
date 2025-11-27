@@ -9,6 +9,7 @@ export enum NodeType {
   LOCATION = 'LOCATION',
   BRANCH = 'BRANCH',
   JUMP = 'JUMP',
+  SET_VARIABLE = 'SET_VARIABLE', // 新增：变量修改节点
 }
 
 export interface NodeData {
@@ -35,13 +36,47 @@ export interface LocationNode extends NodeData {
   hotspots: { id: string; rect: { x: number; y: number; w: number; h: number }; action: string }[];
 }
 
-export type NarrativeNode = DialogueNode | LocationNode | NodeData;
+// 新增：分支节点
+export interface BranchNode extends NodeData {
+  type: NodeType.BRANCH;
+  // 分支条件列表
+  conditions: {
+    id: string;
+    expression: string; // 例如: "coin >= 5" 或 "hasKey == true"
+    // 注意：实际的连接关系存储在 SegmentAsset.edges 中，这里的 ID 主要用于 UI 对应
+  }[];
+  // 默认路径（当所有条件都不满足时）
+  defaultNextNodeId?: string; 
+}
+
+// 新增：变量设置节点
+export interface VariableSetterNode extends NodeData {
+  type: NodeType.SET_VARIABLE;
+  variableName: string;   // 要修改的变量名，如 "coin"
+  operator: 'SET' | 'ADD' | 'SUB'; // 操作符：赋值、加、减
+  value: string;          // 值，如 "10", "true", "player_name"
+}
+
+// 新增：跳转节点 (跨章节)
+export interface JumpNode extends NodeData {
+  type: NodeType.JUMP;
+  targetSegmentId: string; // 跳转到的目标章节 ID
+}
+
+// 更新 NarrativeNode 联合类型
+export type NarrativeNode = 
+  | DialogueNode 
+  | LocationNode 
+  | BranchNode 
+  | VariableSetterNode 
+  | JumpNode 
+  | NodeData;
 
 export interface Edge {
   id: string;
   sourceNodeId: string;
   targetNodeId: string;
-  sourceHandleId?: string; // For nodes with multiple outputs (e.g. choices)
+  sourceHandleId?: string; // For nodes with multiple outputs (e.g. choices, branches)
   condition?: string; // Expression string, e.g. "sanity > 50"
 }
 
@@ -67,6 +102,8 @@ export interface StoryAsset {
   segments: SegmentAsset[];
   characters: CharacterAsset[];
   activeSegmentId: string;
+  // 新增：全局变量定义 (为后续做准备)
+  globalVariables?: Record<string, any>; 
 }
 
 // --- Editor State ---

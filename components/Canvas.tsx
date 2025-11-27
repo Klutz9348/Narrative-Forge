@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { MousePointer2, Type, Image as ImageIcon, ZoomIn, ZoomOut } from 'lucide-react';
-import { NodeType, NarrativeNode, Vector2, DialogueNode } from '../types';
+import { MousePointer2, Type, Image as ImageIcon, ZoomIn, ZoomOut, GitGraph, Variable, ArrowRightCircle } from 'lucide-react';
+import { NodeType, NarrativeNode, Vector2, DialogueNode, BranchNode, VariableSetterNode, JumpNode } from '../types';
 import { useEditorStore } from '../store/useEditorStore';
 
 // Bezier Curve Helper
@@ -298,20 +298,169 @@ const Canvas: React.FC = () => {
     if (type === 'input') {
       return { x: node.position.x, y: node.position.y + node.size.y / 2 };
     } else {
+      // Logic for Multiple Outputs
+      
+      // 1. Dialogue Node Choices
       if (node.type === NodeType.DIALOGUE && handleId) {
         const choices = (node as DialogueNode).choices;
         const choiceIndex = choices.findIndex(c => c.id === handleId);
         if (choiceIndex === -1) return { x: node.position.x + node.size.x, y: node.position.y };
         
+        // Match CSS visual alignment: 
+        // Bottom-up calculation to match mt-auto
+        // padding-bottom: 12px (p-3)
+        // item height: 24px (h-6)
+        // gap: 4px (gap-1)
         const reverseIndex = choices.length - 1 - choiceIndex;
-        const offsetFromBottom = 12 + (reverseIndex * 28) + 12; 
+        const offsetFromBottom = 12 + (reverseIndex * 28) + 12; // 28 = 24 + 4
         
         return { 
             x: node.position.x + node.size.x, 
             y: node.position.y + node.size.y - offsetFromBottom
         };
       }
+
+      // 2. Branch Node Conditions
+      if (node.type === NodeType.BRANCH && handleId) {
+        const conditions = (node as BranchNode).conditions || [];
+        const index = conditions.findIndex(c => c.id === handleId);
+        if (index === -1) return { x: node.position.x + node.size.x, y: node.position.y };
+        
+        // Top-down calculation to match layout
+        // Header height ~ 24px
+        // Padding top 12px
+        // Item height 24px + gap 8px (space-y-2)
+        const offsetFromTop = 24 + 12 + (index * 32) + 12; 
+        
+        return {
+          x: node.position.x + node.size.x,
+          y: node.position.y + offsetFromTop
+        };
+      }
+
+      // Default Single Output
       return { x: node.position.x + node.size.x, y: node.position.y + node.size.y / 2 };
+    }
+  };
+
+  // --- Node Content Renderer ---
+  const renderNodeContent = (node: NarrativeNode) => {
+    switch (node.type) {
+      case NodeType.DIALOGUE:
+        return (
+          <>
+            <div className="font-bold text-zinc-500 mb-1 shrink-0">
+              {story.characters.find(c => c.id === (node as DialogueNode).characterId)?.name}
+            </div>
+            <div className="italic opacity-80 line-clamp-3 mb-2 flex-1 min-h-0">
+              "{(node as DialogueNode).text}"
+            </div>
+            <div className="flex flex-col gap-1 mt-auto shrink-0">
+              {(node as DialogueNode).choices?.map((c) => (
+                <div key={c.id} className="relative flex items-center justify-end h-6 shrink-0 group/choice">
+                    <div className="bg-black/20 px-2 py-1 rounded text-[10px] text-indigo-300 border border-indigo-500/20 w-full text-right truncate h-full flex items-center justify-end">
+                      {c.text}
+                    </div>
+                    {/* Output Handle for Choice */}
+                    <div 
+                      className="absolute -right-[18px] top-1/2 -translate-y-1/2 w-3 h-3 bg-indigo-600 border border-zinc-900 rounded-full hover:scale-125 transition-transform cursor-crosshair z-20"
+                      onMouseDown={(e) => handleHandleMouseDown(e, node.id, c.id)}
+                    />
+                </div>
+              ))}
+            </div>
+          </>
+        );
+      
+      case NodeType.LOCATION:
+        return (
+          <div className="w-full h-full relative">
+              <img 
+              src={(node as any).backgroundImage} 
+              className="absolute inset-0 w-full h-full object-cover opacity-40 grayscale group-hover:grayscale-0 transition-all" 
+              draggable={false}
+              />
+              <div className="relative z-10 p-2 text-center text-zinc-400">
+                场景预览
+              </div>
+          </div>
+        );
+
+      case NodeType.BRANCH:
+        return (
+          <div className="flex flex-col h-full">
+            <div className="text-[10px] text-zinc-500 mb-2 italic">Evaluation Order:</div>
+            <div className="flex flex-col space-y-2">
+              {(node as BranchNode).conditions?.map((c, idx) => (
+                <div key={c.id} className="relative flex items-center h-6 shrink-0">
+                  <div className="bg-black/20 px-2 rounded text-[10px] text-amber-300 border border-amber-500/20 w-full truncate font-mono">
+                    {idx + 1}. {c.expression}
+                  </div>
+                  {/* Output Handle for Condition */}
+                  <div 
+                    className="absolute -right-[18px] top-1/2 -translate-y-1/2 w-3 h-3 bg-amber-600 border border-zinc-900 rounded-full hover:scale-125 transition-transform cursor-crosshair z-20"
+                    onMouseDown={(e) => handleHandleMouseDown(e, node.id, c.id)}
+                  />
+                </div>
+              ))}
+              {(!(node as BranchNode).conditions?.length) && (
+                <div className="text-xs text-zinc-600 text-center">No conditions</div>
+              )}
+            </div>
+             {/* Default Exit (Optional, could be added as a static handle at bottom) */}
+          </div>
+        );
+
+      case NodeType.SET_VARIABLE:
+        const setVarNode = node as VariableSetterNode;
+        return (
+          <div className="flex flex-col justify-center h-full space-y-2">
+             <div className="flex items-center gap-2 bg-black/20 p-1 rounded border border-purple-500/20">
+               <span className="text-purple-400 font-mono">{setVarNode.variableName}</span>
+             </div>
+             <div className="text-center font-bold text-zinc-500 text-[10px]">{setVarNode.operator}</div>
+             <div className="flex items-center gap-2 bg-black/20 p-1 rounded border border-zinc-700">
+               <span className="text-zinc-300 font-mono">{setVarNode.value}</span>
+             </div>
+          </div>
+        );
+      
+      case NodeType.JUMP:
+        const jumpNode = node as JumpNode;
+        const targetSeg = story.segments.find(s => s.id === jumpNode.targetSegmentId);
+        return (
+          <div className="flex items-center justify-center h-full">
+            <div className="flex items-center gap-2 text-rose-300 bg-rose-900/20 px-3 py-2 rounded-full border border-rose-500/30">
+               <ArrowRightCircle className="w-4 h-4" />
+               <span className="font-bold truncate max-w-[120px]">
+                 {targetSeg ? targetSeg.name : 'Select Target'}
+               </span>
+            </div>
+          </div>
+        );
+
+      default:
+        return <div className="text-zinc-500 text-center mt-4">Unknown Node</div>;
+    }
+  };
+
+  const getNodeColorClass = (type: NodeType) => {
+    switch(type) {
+      case NodeType.LOCATION: return 'bg-emerald-900/50 text-emerald-400';
+      case NodeType.BRANCH: return 'bg-amber-900/50 text-amber-400';
+      case NodeType.SET_VARIABLE: return 'bg-purple-900/50 text-purple-400';
+      case NodeType.JUMP: return 'bg-rose-900/50 text-rose-400';
+      default: return 'bg-indigo-900/50 text-indigo-400';
+    }
+  };
+
+  const getNodeIcon = (type: NodeType) => {
+    switch(type) {
+      case NodeType.LOCATION: return <ImageIcon className="w-3 h-3" />;
+      case NodeType.BRANCH: return <GitGraph className="w-3 h-3" />;
+      case NodeType.SET_VARIABLE: return <Variable className="w-3 h-3" />;
+      case NodeType.JUMP: return <ArrowRightCircle className="w-3 h-3" />;
+      default: return <Type className="w-3 h-3" />;
     }
   };
 
@@ -414,8 +563,8 @@ const Canvas: React.FC = () => {
                 onMouseUp={(e) => handleInputMouseUp(e, node.id)}
             />
 
-            {/* Default Output Handle (Right) */}
-            {node.type !== NodeType.DIALOGUE && (
+            {/* Default Output Handle (Right) - Only for types without specific list outputs */}
+            {node.type !== NodeType.DIALOGUE && node.type !== NodeType.BRANCH && (
                <div 
                 className="absolute right-0 top-1/2 translate-x-1/2 -translate-y-1/2 w-4 h-4 bg-zinc-600 border border-zinc-900 rounded-full hover:bg-indigo-500 z-20 cursor-crosshair transition-transform hover:scale-125" 
                 onMouseDown={(e) => handleHandleMouseDown(e, node.id)}
@@ -423,52 +572,14 @@ const Canvas: React.FC = () => {
             )}
 
             {/* Node Header */}
-            <div className={`h-6 px-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider shrink-0
-              ${node.type === NodeType.LOCATION ? 'bg-emerald-900/50 text-emerald-400' : 'bg-indigo-900/50 text-indigo-400'}
-            `}>
-              {node.type === NodeType.LOCATION ? <ImageIcon className="w-3 h-3" /> : <Type className="w-3 h-3" />}
+            <div className={`h-6 px-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider shrink-0 ${getNodeColorClass(node.type)}`}>
+              {getNodeIcon(node.type)}
               <span className="truncate flex-1">{node.name}</span>
             </div>
 
             {/* Node Content */}
             <div className="p-3 text-zinc-300 text-xs flex-1 overflow-hidden relative flex flex-col">
-              {node.type === NodeType.DIALOGUE ? (
-                <>
-                  <div className="font-bold text-zinc-500 mb-1 shrink-0">
-                    {story.characters.find(c => c.id === (node as DialogueNode).characterId)?.name}
-                  </div>
-                  <div className="italic opacity-80 line-clamp-3 mb-2 flex-1 min-h-0">
-                    "{(node as DialogueNode).text}"
-                  </div>
-                  
-                  {/* Choices rendering matching visual handles logic */}
-                  <div className="flex flex-col gap-1 mt-auto shrink-0">
-                    {(node as DialogueNode).choices?.map((c, idx) => (
-                      <div key={c.id} className="relative flex items-center justify-end h-6 shrink-0 group/choice">
-                         <div className="bg-black/20 px-2 py-1 rounded text-[10px] text-indigo-300 border border-indigo-500/20 w-full text-right truncate h-full flex items-center justify-end">
-                            {c.text}
-                          </div>
-                          {/* Output Handle for Choice */}
-                          <div 
-                            className="absolute -right-[18px] top-1/2 -translate-y-1/2 w-3 h-3 bg-indigo-600 border border-zinc-900 rounded-full hover:scale-125 transition-transform cursor-crosshair z-20"
-                            onMouseDown={(e) => handleHandleMouseDown(e, node.id, c.id)}
-                          />
-                      </div>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <div className="w-full h-full relative">
-                   <img 
-                    src={(node as any).backgroundImage} 
-                    className="absolute inset-0 w-full h-full object-cover opacity-40 grayscale group-hover:grayscale-0 transition-all" 
-                    draggable={false}
-                   />
-                   <div className="relative z-10 p-2 text-center text-zinc-400">
-                     场景预览
-                   </div>
-                </div>
-              )}
+               {renderNodeContent(node)}
             </div>
           </div>
         ))}
@@ -478,11 +589,12 @@ const Canvas: React.FC = () => {
       <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-zinc-800 rounded-lg shadow-xl border border-zinc-700 flex items-center p-1 gap-1 z-30">
         <button className="p-2 hover:bg-zinc-700 rounded text-white" title="选择 (V)"><MousePointer2 className="w-4 h-4" /></button>
         <div className="w-px h-4 bg-zinc-700 mx-1"></div>
+        
         <button 
           draggable
           onDragStart={(e) => onDragStart(e, NodeType.DIALOGUE)}
           className="p-2 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white cursor-grab active:cursor-grabbing" 
-          title="新建对话 (拖拽或点击)"
+          title="对话"
           onClick={() => handleAddNode(NodeType.DIALOGUE)}
         >
           <Type className="w-4 h-4" />
@@ -491,10 +603,37 @@ const Canvas: React.FC = () => {
           draggable
           onDragStart={(e) => onDragStart(e, NodeType.LOCATION)}
           className="p-2 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white cursor-grab active:cursor-grabbing"
-          title="新建场景 (拖拽或点击)"
+          title="场景"
           onClick={() => handleAddNode(NodeType.LOCATION)}
         >
           <ImageIcon className="w-4 h-4" />
+        </button>
+         <button 
+          draggable
+          onDragStart={(e) => onDragStart(e, NodeType.BRANCH)}
+          className="p-2 hover:bg-zinc-700 rounded text-zinc-400 hover:text-amber-400 cursor-grab active:cursor-grabbing"
+          title="逻辑分支"
+          onClick={() => handleAddNode(NodeType.BRANCH)}
+        >
+          <GitGraph className="w-4 h-4" />
+        </button>
+         <button 
+          draggable
+          onDragStart={(e) => onDragStart(e, NodeType.SET_VARIABLE)}
+          className="p-2 hover:bg-zinc-700 rounded text-zinc-400 hover:text-purple-400 cursor-grab active:cursor-grabbing"
+          title="设置变量"
+          onClick={() => handleAddNode(NodeType.SET_VARIABLE)}
+        >
+          <Variable className="w-4 h-4" />
+        </button>
+        <button 
+          draggable
+          onDragStart={(e) => onDragStart(e, NodeType.JUMP)}
+          className="p-2 hover:bg-zinc-700 rounded text-zinc-400 hover:text-rose-400 cursor-grab active:cursor-grabbing"
+          title="跳转章节"
+          onClick={() => handleAddNode(NodeType.JUMP)}
+        >
+          <ArrowRightCircle className="w-4 h-4" />
         </button>
       </div>
 

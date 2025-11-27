@@ -32,18 +32,26 @@ export class AssetManager {
     const base = {
       id,
       type,
-      name: type === NodeType.DIALOGUE ? 'Dialogue' : 'Node',
+      name: 'Node', // Default name, overridden below
       position,
       size: { x: 300, y: 200 },
       parentId: undefined
     };
 
-    if (type === NodeType.DIALOGUE) {
-      return { ...base, characterId: '', text: '...', choices: [] } as any;
-    } else if (type === NodeType.LOCATION) {
-        return { ...base, backgroundImage: '', hotspots: [] } as any;
+    switch (type) {
+      case NodeType.DIALOGUE:
+        return { ...base, name: 'Dialogue', characterId: '', text: '...', choices: [] } as any;
+      case NodeType.LOCATION:
+        return { ...base, name: 'Location', backgroundImage: '', hotspots: [] } as any;
+      case NodeType.BRANCH:
+        return { ...base, name: 'Logic Branch', conditions: [] } as any;
+      case NodeType.SET_VARIABLE:
+        return { ...base, name: 'Set Variable', variableName: 'new_var', operator: 'SET', value: '0', size: { x: 250, y: 150 } } as any;
+      case NodeType.JUMP:
+        return { ...base, name: 'Jump to...', targetSegmentId: '', size: { x: 250, y: 120 } } as any;
+      default:
+        return base as NarrativeNode;
     }
-    return base as NarrativeNode;
   }
   
   static createEdge(sourceId: string, targetId: string, sourceHandle?: string): Edge {
