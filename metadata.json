@@ -1,0 +1,5 @@
+{
+  "name": "Narrative Forge 叙事工坊",
+  "description": "一个受 Figma 启发的叙事游戏可视化编辑器，具有类似 Unity 的组件系统和 AI 辅助内容生成功能。",
+  "requestFramePermissions": []
+}
