@@ -1,0 +1,646 @@
+{
+  "id": "story_complex",
+  "title": "复杂示例：约会与调查",
+  "description": "多地点、多热区、分支与状态判定示例。",
+  "activeSegmentId": "seg_main",
+  "globalVariables": [],
+  "attributes": [
+    {
+      "id": "attr_sanity",
+      "key": "sanity",
+      "name": "理智值",
+      "type": "number",
+      "defaultValue": 80,
+      "min": 0,
+      "max": 100
+    },
+    {
+      "id": "attr_coin",
+      "key": "coin",
+      "name": "新日元",
+      "type": "number",
+      "defaultValue": 200,
+      "min": 0
+    },
+    {
+      "id": "attr_has_key",
+      "key": "has_key_flag",
+      "name": "是否有钥匙",
+      "type": "boolean",
+      "defaultValue": false
+    },
+    {
+      "id": "attr_date_choice",
+      "key": "date_choice",
+      "name": "约会地点",
+      "type": "string",
+      "defaultValue": ""
+    }
+  ],
+  "characters": [
+    {
+      "id": "char_detective",
+      "name": "K 探员",
+      "avatarUrl": "https://picsum.photos/id/64/200/200"
+    },
+    {
+      "id": "char_ai",
+      "name": "ARIA",
+      "avatarUrl": "https://picsum.photos/id/237/200/200"
+    }
+  ],
+  "items": [
+    {
+      "id": "item_key",
+      "name": "旧钥匙",
+      "description": "可能打开废弃大楼的门。"
+    },
+    {
+      "id": "item_note",
+      "name": "模糊的便签",
+      "description": "上面写着 '午夜钟声'。"
+    }
+  ],
+  "shops": [],
+  "clues": [],
+  "segments": [
+    {
+      "id": "seg_main",
+      "name": "主线",
+      "rootNodeId": "node_start",
+      "nodes": {
+        "node_start": {
+          "id": "node_start",
+          "type": "START",
+          "name": "Start",
+          "position": {
+            "x": 40,
+            "y": 200
+          },
+          "size": {
+            "x": 120,
+            "y": 60
+          }
+        },
+        "node_loc_poster": {
+          "id": "node_loc_poster",
+          "type": "LOCATION",
+          "name": "招募海报",
+          "position": {
+            "x": 240,
+            "y": 60
+          },
+          "size": {
+            "x": 420,
+            "y": 300
+          },
+          "backgroundImage": "https://picsum.photos/id/1043/800/600",
+          "hotspots": [
+            {
+              "id": "hs_join",
+              "name": "报名信息",
+              "rect": {
+                "x": 60,
+                "y": 60,
+                "w": 16,
+                "h": 16
+              }
+            }
+          ],
+          "events": [
+            {
+              "id": "evt_enter_poster",
+              "type": "lifecycle",
+              "trigger": "onEnter",
+              "label": "进入海报",
+              "actions": []
+            },
+            {
+              "id": "evt_click_join",
+              "type": "interaction",
+              "trigger": "onClick",
+              "targetId": "hs_join",
+              "label": "Click: 报名信息",
+              "actions": []
+            }
+          ]
+        },
+        "node_action_poster_enter": {
+          "id": "node_action_poster_enter",
+          "type": "ACTION",
+          "name": "海报提示",
+          "position": {
+            "x": 700,
+            "y": 40
+          },
+          "size": {
+            "x": 240,
+            "y": 100
+          },
+          "actions": [
+            {
+              "id": "act_poster_sanity",
+              "type": "UPDATE_ATTRIBUTE",
+              "params": {
+                "attributeId": "attr_sanity",
+                "op": "add",
+                "value": -2
+              }
+            },
+            {
+              "id": "act_poster_toast",
+              "type": "SHOW_TOAST",
+              "params": {
+                "message": "海报引起你的注意，理智 -2"
+              }
+            }
+          ]
+        },
+        "node_dialog_intro": {
+          "id": "node_dialog_intro",
+          "type": "DIALOGUE",
+          "name": "招募对话",
+          "position": {
+            "x": 720,
+            "y": 140
+          },
+          "size": {
+            "x": 320,
+            "y": 180
+          },
+          "characterId": "char_ai",
+          "text": "报名已提交，选择你的约会地点。",
+          "choices": [
+            {
+              "id": "c_goto_choice",
+              "text": "前往选择界面"
+            }
+          ]
+        },
+        "node_loc_choice": {
+          "id": "node_loc_choice",
+          "type": "LOCATION",
+          "name": "选择约会地点",
+          "position": {
+            "x": 240,
+            "y": 380
+          },
+          "size": {
+            "x": 420,
+            "y": 300
+          },
+          "backgroundImage": "https://picsum.photos/id/180/800/600",
+          "hotspots": [
+            {
+              "id": "hs_cafe",
+              "name": "咖啡厅",
+              "rect": {
+                "x": 20,
+                "y": 60,
+                "w": 14,
+                "h": 16
+              }
+            },
+            {
+              "id": "hs_aqua",
+              "name": "水族馆",
+              "rect": {
+                "x": 60,
+                "y": 50,
+                "w": 14,
+                "h": 16
+              }
+            }
+          ],
+          "events": [
+            {
+              "id": "evt_click_cafe",
+              "type": "interaction",
+              "trigger": "onClick",
+              "targetId": "hs_cafe",
+              "label": "Click: 咖啡厅",
+              "actions": []
+            },
+            {
+              "id": "evt_click_aqua",
+              "type": "interaction",
+              "trigger": "onClick",
+              "targetId": "hs_aqua",
+              "label": "Click: 水族馆",
+              "actions": []
+            }
+          ]
+        },
+        "node_action_choose_cafe": {
+          "id": "node_action_choose_cafe",
+          "type": "ACTION",
+          "name": "选择咖啡厅",
+          "position": {
+            "x": 700,
+            "y": 320
+          },
+          "size": {
+            "x": 240,
+            "y": 100
+          },
+          "actions": [
+            {
+              "id": "act_set_choice_cafe",
+              "type": "UPDATE_ATTRIBUTE",
+              "params": {
+                "attributeId": "attr_date_choice",
+                "op": "set",
+                "value": "cafe"
+              }
+            },
+            {
+              "id": "act_toast_cafe",
+              "type": "SHOW_TOAST",
+              "params": {
+                "message": "你选择了咖啡厅"
+              }
+            }
+          ]
+        },
+        "node_action_choose_aqua": {
+          "id": "node_action_choose_aqua",
+          "type": "ACTION",
+          "name": "选择水族馆",
+          "position": {
+            "x": 700,
+            "y": 450
+          },
+          "size": {
+            "x": 240,
+            "y": 100
+          },
+          "actions": [
+            {
+              "id": "act_set_choice_aqua",
+              "type": "UPDATE_ATTRIBUTE",
+              "params": {
+                "attributeId": "attr_date_choice",
+                "op": "set",
+                "value": "aqua"
+              }
+            },
+            {
+              "id": "act_toast_aqua",
+              "type": "SHOW_TOAST",
+              "params": {
+                "message": "你选择了水族馆"
+              }
+            }
+          ]
+        },
+        "node_branch_choice": {
+          "id": "node_branch_choice",
+          "type": "BRANCH",
+          "name": "地点分支",
+          "position": {
+            "x": 1000,
+            "y": 380
+          },
+          "size": {
+            "x": 200,
+            "y": 140
+          },
+          "conditions": [
+            {
+              "id": "cond_cafe",
+              "variableId": "attr_date_choice",
+              "operator": "==",
+              "value": "cafe"
+            },
+            {
+              "id": "cond_aqua",
+              "variableId": "attr_date_choice",
+              "operator": "==",
+              "value": "aqua"
+            }
+          ]
+        },
+        "node_loc_cafe": {
+          "id": "node_loc_cafe",
+          "type": "LOCATION",
+          "name": "咖啡厅",
+          "position": {
+            "x": 1260,
+            "y": 200
+          },
+          "size": {
+            "x": 420,
+            "y": 300
+          },
+          "backgroundImage": "https://picsum.photos/id/292/800/600",
+          "hotspots": [
+            {
+              "id": "hs_barista",
+              "name": "柜台",
+              "rect": {
+                "x": 10,
+                "y": 60,
+                "w": 16,
+                "h": 16
+              }
+            }
+          ],
+          "events": [
+            {
+              "id": "evt_enter_cafe",
+              "type": "lifecycle",
+              "trigger": "onEnter",
+              "label": "进入咖啡厅",
+              "actions": []
+            },
+            {
+              "id": "evt_click_barista",
+              "type": "interaction",
+              "trigger": "onClick",
+              "targetId": "hs_barista",
+              "label": "Click: 柜台",
+              "actions": []
+            }
+          ]
+        },
+        "node_loc_aqua": {
+          "id": "node_loc_aqua",
+          "type": "LOCATION",
+          "name": "水族馆",
+          "position": {
+            "x": 1260,
+            "y": 520
+          },
+          "size": {
+            "x": 420,
+            "y": 300
+          },
+          "backgroundImage": "https://picsum.photos/id/1069/800/600",
+          "hotspots": [
+            {
+              "id": "hs_tank",
+              "name": "观景窗",
+              "rect": {
+                "x": 60,
+                "y": 50,
+                "w": 14,
+                "h": 16
+              }
+            }
+          ],
+          "events": [
+            {
+              "id": "evt_enter_aqua",
+              "type": "lifecycle",
+              "trigger": "onEnter",
+              "label": "进入水族馆",
+              "actions": []
+            },
+            {
+              "id": "evt_click_tank",
+              "type": "interaction",
+              "trigger": "onClick",
+              "targetId": "hs_tank",
+              "label": "Click: 观景窗",
+              "actions": []
+            }
+          ]
+        },
+        "node_action_cafe_enter": {
+          "id": "node_action_cafe_enter",
+          "type": "ACTION",
+          "name": "咖啡厅提示",
+          "position": {
+            "x": 1700,
+            "y": 180
+          },
+          "size": {
+            "x": 240,
+            "y": 90
+          },
+          "actions": [
+            {
+              "id": "act_cafe_toast",
+              "type": "SHOW_TOAST",
+              "params": {
+                "message": "咖啡香气扑鼻。"
+              }
+            }
+          ]
+        },
+        "node_action_aqua_enter": {
+          "id": "node_action_aqua_enter",
+          "type": "ACTION",
+          "name": "水族馆提示",
+          "position": {
+            "x": 1700,
+            "y": 520
+          },
+          "size": {
+            "x": 240,
+            "y": 90
+          },
+          "actions": [
+            {
+              "id": "act_aqua_toast",
+              "type": "SHOW_TOAST",
+              "params": {
+                "message": "水波粼粼，鱼儿游动。"
+              }
+            }
+          ]
+        },
+        "node_dialog_barista": {
+          "id": "node_dialog_barista",
+          "type": "DIALOGUE",
+          "name": "柜台对话",
+          "position": {
+            "x": 1500,
+            "y": 120
+          },
+          "size": {
+            "x": 320,
+            "y": 180
+          },
+          "characterId": "char_detective",
+          "text": "请给我一杯拿铁。",
+          "choices": [
+            {
+              "id": "c_barista_pay",
+              "text": "付款"
+            }
+          ]
+        },
+        "node_action_barista": {
+          "id": "node_action_barista",
+          "type": "ACTION",
+          "name": "付款",
+          "position": {
+            "x": 1820,
+            "y": 120
+          },
+          "size": {
+            "x": 240,
+            "y": 100
+          },
+          "actions": [
+            {
+              "id": "act_pay_coin",
+              "type": "UPDATE_ATTRIBUTE",
+              "params": {
+                "attributeId": "attr_coin",
+                "op": "sub",
+                "value": 20
+              }
+            },
+            {
+              "id": "act_barista_toast",
+              "type": "SHOW_TOAST",
+              "params": {
+                "message": "支付20新日元，获得咖啡。"
+              }
+            }
+          ]
+        },
+        "node_dialog_tank": {
+          "id": "node_dialog_tank",
+          "type": "DIALOGUE",
+          "name": "观景对话",
+          "position": {
+            "x": 1500,
+            "y": 620
+          },
+          "size": {
+            "x": 320,
+            "y": 180
+          },
+          "characterId": "char_ai",
+          "text": "那条鱼看起来很特别，或许藏着线索。",
+          "choices": [
+            {
+              "id": "c_tank_watch",
+              "text": "继续观察"
+            }
+          ]
+        },
+        "node_action_tank": {
+          "id": "node_action_tank",
+          "type": "ACTION",
+          "name": "观察鱼群",
+          "position": {
+            "x": 1820,
+            "y": 620
+          },
+          "size": {
+            "x": 240,
+            "y": 100
+          },
+          "actions": [
+            {
+              "id": "act_tank_toast",
+              "type": "SHOW_TOAST",
+              "params": {
+                "message": "你注意到鱼群形状像一把钥匙。"
+              }
+            }
+          ]
+        }
+      },
+      "edges": [
+        {
+          "id": "edge_start",
+          "sourceNodeId": "node_start",
+          "targetNodeId": "node_loc_poster"
+        },
+        {
+          "id": "edge_poster_enter",
+          "sourceNodeId": "node_loc_poster",
+          "sourceHandleId": "evt_enter_poster",
+          "targetNodeId": "node_action_poster_enter"
+        },
+        {
+          "id": "edge_click_join",
+          "sourceNodeId": "node_loc_poster",
+          "sourceHandleId": "evt_click_join",
+          "targetNodeId": "node_dialog_intro"
+        },
+        {
+          "id": "edge_to_choice",
+          "sourceNodeId": "node_dialog_intro",
+          "sourceHandleId": "c_goto_choice",
+          "targetNodeId": "node_loc_choice"
+        },
+        {
+          "id": "edge_choice_cafe",
+          "sourceNodeId": "node_loc_choice",
+          "sourceHandleId": "evt_click_cafe",
+          "targetNodeId": "node_action_choose_cafe"
+        },
+        {
+          "id": "edge_choice_aqua",
+          "sourceNodeId": "node_loc_choice",
+          "sourceHandleId": "evt_click_aqua",
+          "targetNodeId": "node_action_choose_aqua"
+        },
+        {
+          "id": "edge_choose_cafe_branch",
+          "sourceNodeId": "node_action_choose_cafe",
+          "targetNodeId": "node_branch_choice"
+        },
+        {
+          "id": "edge_choose_aqua_branch",
+          "sourceNodeId": "node_action_choose_aqua",
+          "targetNodeId": "node_branch_choice"
+        },
+        {
+          "id": "edge_branch_cafe",
+          "sourceNodeId": "node_branch_choice",
+          "sourceHandleId": "cond_cafe",
+          "targetNodeId": "node_loc_cafe"
+        },
+        {
+          "id": "edge_branch_aqua",
+          "sourceNodeId": "node_branch_choice",
+          "sourceHandleId": "cond_aqua",
+          "targetNodeId": "node_loc_aqua"
+        },
+        {
+          "id": "edge_cafe_enter",
+          "sourceNodeId": "node_loc_cafe",
+          "sourceHandleId": "evt_enter_cafe",
+          "targetNodeId": "node_action_cafe_enter"
+        },
+        {
+          "id": "edge_aqua_enter",
+          "sourceNodeId": "node_loc_aqua",
+          "sourceHandleId": "evt_enter_aqua",
+          "targetNodeId": "node_action_aqua_enter"
+        },
+        {
+          "id": "edge_click_barista",
+          "sourceNodeId": "node_loc_cafe",
+          "sourceHandleId": "evt_click_barista",
+          "targetNodeId": "node_dialog_barista"
+        },
+        {
+          "id": "edge_barista_pay",
+          "sourceNodeId": "node_dialog_barista",
+          "sourceHandleId": "c_barista_pay",
+          "targetNodeId": "node_action_barista"
+        },
+        {
+          "id": "edge_click_tank",
+          "sourceNodeId": "node_loc_aqua",
+          "sourceHandleId": "evt_click_tank",
+          "targetNodeId": "node_dialog_tank"
+        },
+        {
+          "id": "edge_tank_watch",
+          "sourceNodeId": "node_dialog_tank",
+          "sourceHandleId": "c_tank_watch",
+          "targetNodeId": "node_action_tank"
+        }
+      ]
+    }
+  ]
+}

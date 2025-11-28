@@ -23,6 +23,12 @@ const GameOverlay: React.FC = () => {
     const handleNodeEnter = ({ node }: any) => {
       runtime.setCurrentNode(node);
       
+      // Persist active scene when entering a location
+      if (node.type === NodeType.LOCATION) {
+        runtime.setCurrentScene(node as LocationNode);
+        runtime.setLastLocationBackground((node as LocationNode).backgroundImage);
+      }
+      
       // Auto-add dialogue to history
       if (node.type === NodeType.DIALOGUE) {
         const dNode = node as DialogueNode;
@@ -72,17 +78,20 @@ const GameOverlay: React.FC = () => {
   // -- Render Helpers --
 
   const currentNode = runtime.currentNode;
-  const isLocation = currentNode?.type === NodeType.LOCATION;
+  const scene = runtime.currentScene;
+  const isLocation = !!scene;
   const isDialogue = currentNode?.type === NodeType.DIALOGUE;
   const isVote = currentNode?.type === NodeType.VOTE;
 
   // Find background image (persist last known location image if in dialogue)
-  const bgImage = currentNode?.type === NodeType.LOCATION 
-      ? (currentNode as LocationNode).backgroundImage 
-      : ''; // Simple logic for MVP, ideally persist from last location
+  const bgImage = scene?.backgroundImage || runtime.lastLocationBackground || '';
 
   const handleChoice = (choiceId?: string) => {
-    EngineInstance.advance(choiceId);
+    const next = EngineInstance.advance(choiceId);
+    if (!next) {
+      // 没有后续节点：保持场景背景，关闭前景对话
+      runtime.setCurrentNode(null);
+    }
   };
 
   const handleHotspotClick = (hotspotId: string) => {
@@ -153,9 +162,9 @@ const GameOverlay: React.FC = () => {
       </div>
 
       {/* 3. Scene Interaction Layer (Hotspots) */}
-      {isLocation && (
+      {scene && (
           <div className="absolute inset-0 pointer-events-none">
-              {(currentNode as LocationNode).hotspots?.map(hs => (
+              {scene.hotspots?.map(hs => (
                   <div 
                     key={hs.id}
                     onClick={() => handleHotspotClick(hs.id)}
@@ -190,7 +199,15 @@ const GameOverlay: React.FC = () => {
 
          {/* Dialogue Box */}
          {isDialogue && (
-             <div className="w-full max-w-3xl bg-black/80 backdrop-blur-md border border-white/10 rounded-xl p-6 pointer-events-auto animate-in slide-in-from-bottom-10 fade-in duration-300">
+             <div
+               className="w-full max-w-3xl bg-black/80 backdrop-blur-md border border-white/10 rounded-xl p-6 pointer-events-auto animate-in slide-in-from-bottom-10 fade-in duration-300"
+               onClick={() => {
+                 // If no choices, clicking对话区域也前进
+                 if (!(currentNode as DialogueNode).choices?.length) {
+                   handleChoice();
+                 }
+               }}
+             >
                  {/* Speaker */}
                  <div className="text-amber-400 font-bold text-lg mb-2 flex items-center gap-2">
                     <User className="w-4 h-4" />
@@ -208,7 +225,7 @@ const GameOverlay: React.FC = () => {
                         {(currentNode as DialogueNode).choices.map(choice => (
                             <button 
                                 key={choice.id}
-                                onClick={() => handleChoice(choice.id)}
+                                onClick={(e) => { e.stopPropagation(); handleChoice(choice.id); }}
                                 className="px-5 py-2 bg-indigo-600/80 hover:bg-indigo-500 text-white rounded-lg border border-indigo-400/30 transition-all transform hover:scale-105 active:scale-95 text-sm font-semibold"
                             >
                                 {choice.text}
@@ -218,7 +235,7 @@ const GameOverlay: React.FC = () => {
                  ) : (
                      // Click to continue arrow
                      <div className="flex justify-end mt-4">
-                        <button onClick={() => handleChoice()} className="animate-bounce p-2 hover:bg-white/10 rounded-full">
+                        <button onClick={(e) => { e.stopPropagation(); handleChoice(); }} className="animate-bounce p-2 hover:bg-white/10 rounded-full">
                             <SkipForward className="w-5 h-5 text-zinc-400" />
                         </button>
                      </div>

@@ -1,105 +1,66 @@
 
+import { LogicAction, ScriptAction } from '../types';
 import { IEventBus, IVariableStore } from './interfaces';
-import { ScriptAction, ScriptActionType } from '../types';
+import { ActionRegistry } from './logic/ActionRegistry';
+import { ActionContext, ActionExtension } from './logic/types';
+import { actionRegistry as sharedActionRegistry } from './logic/registries';
 
 export class ActionExecutor {
+  private registry: ActionRegistry;
+
   constructor(
     private store: IVariableStore,
-    private eventBus: IEventBus
-  ) {}
+    private eventBus: IEventBus,
+    registry: ActionRegistry = sharedActionRegistry
+  ) {
+    this.registry = registry;
+  }
 
-  async executeGroup(actions: ScriptAction[]): Promise<void> {
+  register(extension: ActionExtension) {
+    this.registry.register(extension);
+  }
+
+  async executeGroup(actions: (ScriptAction | LogicAction)[]): Promise<void> {
     for (const action of actions) {
       await this.execute(action);
     }
   }
 
-  async execute(action: ScriptAction): Promise<void> {
+  async execute(action: ScriptAction | LogicAction): Promise<void> {
     console.log(`[ActionExecutor] Executing ${action.type}`, action.params);
 
-    try {
-      switch (action.type) {
-        // --- RPG Attributes ---
-        case ScriptActionType.UPDATE_ATTRIBUTE: {
-          const { attributeId, op, value } = action.params;
-          if (attributeId) {
-            this.store.modifyAttribute(attributeId, op || 'set', Number(value));
-          }
-          break;
-        }
+    const context: ActionContext = {
+      variableStore: this.store,
+      eventBus: this.eventBus,
+      scope: 'global'
+    };
 
-        // --- Inventory ---
-        case ScriptActionType.ADD_ITEM: {
-          const { itemId, count } = action.params;
-          if (itemId) this.store.addItem(itemId, count || 1);
-          break;
-        }
-        case ScriptActionType.REMOVE_ITEM: {
-          const { itemId, count } = action.params;
-          if (itemId) this.store.removeItem(itemId, count || 1);
-          break;
-        }
-
-        // --- Knowledge / Clues ---
-        case ScriptActionType.ADD_CLUE: {
-          const { clueId, characterId } = action.params;
-          if (clueId) this.store.addClue(clueId, characterId);
-          break;
-        }
-        case ScriptActionType.REMOVE_CLUE: {
-          const { clueId, characterId } = action.params;
-          if (clueId) this.store.removeClue(clueId, characterId);
-          break;
-        }
-        case ScriptActionType.SHARE_CLUE: {
-          const { clueId, fromCharacterId, toCharacterId } = action.params;
-          if (clueId && fromCharacterId && toCharacterId) {
-            this.store.shareClue(clueId, fromCharacterId, toCharacterId);
-          }
-          break;
-        }
-
-        // --- Interaction / Commerce ---
-        case ScriptActionType.OPEN_SHOP: {
-          const { shopId } = action.params;
-          if (shopId) {
-            this.eventBus.emit('ui:openShop', { shopId });
-          }
-          break;
-        }
-        case ScriptActionType.OPEN_CRAFTING: {
-            this.eventBus.emit('ui:openCrafting', action.params);
-            break;
-        }
-
-        // --- Presentation ---
-        case ScriptActionType.SHOW_TOAST: {
-          const { message, duration } = action.params;
-          this.eventBus.emit('ui:toast', { message, duration });
-          break;
-        }
-        case ScriptActionType.PLAY_SOUND: {
-          const { soundId, volume } = action.params;
-          this.eventBus.emit('audio:playSfx', { soundId, volume });
-          break;
-        }
-        case ScriptActionType.SCREEN_SHAKE: {
-          const { intensity, duration } = action.params;
-          this.eventBus.emit('ui:shake', { intensity, duration });
-          break;
-        }
-        case ScriptActionType.WAIT: {
-          const { duration } = action.params;
-          const seconds = duration || 1;
-          await new Promise(resolve => setTimeout(resolve, seconds * 1000));
-          break;
-        }
-
-        default:
-          console.warn(`[ActionExecutor] Unknown action type: ${action.type}`);
+    const runner = async () => {
+      if (action.delayMs && action.delayMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, action.delayMs));
       }
+      await this.registry.run(action, context);
+    };
+
+    if (action.async) {
+      runner().catch(err => {
+        if (action.ignoreError) {
+          console.error(`[ActionExecutor] Ignored async error for action ${action.type}:`, err);
+        } else {
+          console.error(`[ActionExecutor] Async action failed: ${action.type}`, err);
+        }
+      });
+      return;
+    }
+
+    try {
+      await runner();
     } catch (e) {
-      console.error(`[ActionExecutor] Failed to execute action ${action.id}:`, e);
+      if (action.ignoreError) {
+        console.error(`[ActionExecutor] Ignored error for action ${action.type}:`, e);
+      } else {
+        throw e;
+      }
     }
   }
 }

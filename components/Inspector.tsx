@@ -1,10 +1,11 @@
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { MousePointer2, MoreVertical, Wand2, Plus, Trash2, ArrowRightCircle, Mic, Music, LayoutTemplate, Settings2, Code, Split, Zap, PlayCircle, StopCircle, Target, Clapperboard, Timer, Smartphone, MessageSquare, ImageIcon, Play, Gauge, Package, MinusCircle, ChevronDown, ChevronRight, Vote, Search, Share2, ShoppingCart } from 'lucide-react';
-import { NodeType, DialogueNode, BranchNode, JumpNode, LocationNode, NodeEvent, Hotspot, ActionNode, ScriptActionType, ScriptAction, LogicOperator, VariableType, VoteNode } from '../types';
+import { NodeType, DialogueNode, BranchNode, JumpNode, LocationNode, NodeEvent, Hotspot, ActionNode, ScriptAction, LogicOperator, VariableType, VoteNode, ScriptActionType } from '../types';
 import * as GeminiService from '../services/geminiService';
 import { useEditorStore } from '../store/useEditorStore';
-import { ACTION_REGISTRY, ParamConfig } from '../engine/Registry';
+import { ParamConfig } from '../engine/logic/types';
+import { getActionCatalog } from '../engine/logic/uiCatalog';
 import { useShallow } from 'zustand/react/shallow';
 
 const NODE_TYPE_LABELS: Record<NodeType, string> = {
@@ -12,6 +13,8 @@ const NODE_TYPE_LABELS: Record<NodeType, string> = {
   [NodeType.DIALOGUE]: '对话 (Dialogue)',
   [NodeType.LOCATION]: '场景 (Location)',
   [NodeType.BRANCH]: '逻辑分支 (Branch)',
+  [NodeType.SEQUENCE]: '顺序执行 (Sequence)',
+  [NodeType.SWITCH]: '条件切换 (Switch)',
   [NodeType.JUMP]: '章节跳转 (Jump)',
   [NodeType.ACTION]: '动作序列 (Action Script)',
   [NodeType.VOTE]: '投票 (Vote)',
@@ -32,6 +35,8 @@ const ADDON_DEFINITIONS: Record<NodeType, { key: string; label: string; icon: Re
   [NodeType.BRANCH]: [
     { key: 'defaultNextNodeId', label: '默认路径 (Else Path)', icon: <Split className="w-3 h-3"/>, defaultValue: '' }
   ],
+  [NodeType.SEQUENCE]: [],
+  [NodeType.SWITCH]: [],
   [NodeType.JUMP]: [],
   [NodeType.ACTION]: [],
   [NodeType.VOTE]: []
@@ -67,6 +72,12 @@ const ActionStackEditor: React.FC<{
   onChange: (actions: ScriptAction[]) => void;
   onBlur: () => void;
 }> = ({ actions, onChange, onBlur }) => {
+  const actionDefs = getActionCatalog();
+  const actionDefMap = useMemo(() => {
+    const map: Record<string, ReturnType<typeof getActionCatalog>[number]> = {};
+    actionDefs.forEach(def => { map[def.id] = def; });
+    return map;
+  }, [actionDefs]);
   // Only select meta data needed for dropdowns
   const { characters, items, clues, attributes, shops } = useEditorStore(useShallow(state => ({
       characters: state.story.characters,
@@ -78,7 +89,7 @@ const ActionStackEditor: React.FC<{
 
   const [showMenu, setShowMenu] = useState(false);
 
-  const addAction = (type: ScriptActionType) => {
+  const addAction = (type: string) => {
     const newAction: ScriptAction = {
       id: `act_${Date.now()}`,
       type,
@@ -98,8 +109,59 @@ const ActionStackEditor: React.FC<{
     onChange(actions.map(a => a.id === id ? { ...a, params: { ...a.params, [key]: value } } : a));
   };
 
-  const renderInput = (param: ParamConfig, value: any, onChange: (val: any) => void) => {
+  const renderInput = (action: ScriptAction, param: ParamConfig, value: any, onChange: (val: any) => void) => {
       const commonClasses = "bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300 text-xs w-full focus:outline-none focus:border-indigo-500";
+      
+      // Detect attribute type for UpdateAttribute to drive boolean/string UI
+      let attributeType: VariableType | undefined;
+      const isUpdateAttr = action.type === ScriptActionType.UPDATE_ATTRIBUTE;
+      if (isUpdateAttr) {
+        const attrId = action.params?.attributeId;
+        const attr = attributes.find(a => a.id === attrId);
+        attributeType = attr?.type;
+      }
+
+      // Boolean value input
+      if (param.type === 'boolean' || (param.name === 'value' && action.type === ScriptActionType.UPDATE_ATTRIBUTE && attributeType === 'boolean')) {
+          const valStr = value === undefined ? String(param.defaultValue ?? false) : String(value);
+          return (
+              <select
+                className={commonClasses}
+                value={valStr}
+                onChange={(e) => onChange(e.target.value === 'true')}
+                onBlur={onBlur}
+              >
+                <option value="true">true</option>
+                <option value="false">false</option>
+              </select>
+          );
+      }
+
+      // Boolean op input: only "="
+      if (param.name === 'op' && isUpdateAttr && attributeType === 'boolean') {
+          return (
+              <select
+                className={commonClasses}
+                value={value || 'set'}
+                onChange={(e) => onChange(e.target.value)}
+                onBlur={onBlur}
+              >
+                <option value="set">=</option>
+              </select>
+          );
+      }
+      if (param.name === 'op' && isUpdateAttr && attributeType === 'string') {
+          return (
+              <select
+                className={commonClasses}
+                value={value || 'set'}
+                onChange={(e) => onChange(e.target.value)}
+                onBlur={onBlur}
+              >
+                <option value="set">=</option>
+              </select>
+          );
+      }
       
       if (param.type === 'select' && param.options) {
           return (
@@ -135,6 +197,19 @@ const ActionStackEditor: React.FC<{
           );
       }
 
+      if (param.name === 'value' && isUpdateAttr && attributeType === 'string') {
+          return (
+              <input 
+                type="text"
+                className={commonClasses}
+                value={value !== undefined ? value : (param.defaultValue || '')}
+                onChange={(e) => onChange(e.target.value)}
+                onBlur={onBlur}
+                placeholder={param.placeholder}
+              />
+          );
+      }
+
       if (param.type === 'number') {
           return (
               <input 
@@ -164,7 +239,7 @@ const ActionStackEditor: React.FC<{
   return (
     <div className="space-y-2">
       {actions.map((action, idx) => {
-        const def = ACTION_REGISTRY[action.type];
+        const def = actionDefMap[action.type];
         if (!def) return <div key={action.id} className="text-red-500 text-xs">Unknown Action: {action.type}</div>;
 
         return (
@@ -184,7 +259,7 @@ const ActionStackEditor: React.FC<{
                 {def.params.map(param => (
                     <div key={param.name} className="flex flex-col gap-1">
                         {param.label && <label className="text-[10px] text-zinc-500 uppercase">{param.label}</label>}
-                        {renderInput(param, action.params[param.name], (val) => updateActionParam(action.id, param.name, val))}
+                        {renderInput(action, param, action.params[param.name], (val) => updateActionParam(action.id, param.name, val))}
                     </div>
                 ))}
              </div>
@@ -206,10 +281,10 @@ const ActionStackEditor: React.FC<{
                 <span>Select Action</span>
                 <button onClick={() => setShowMenu(false)}><Plus className="w-3 h-3 rotate-45" /></button>
              </div>
-             {Object.values(ACTION_REGISTRY).map(def => (
+             {actionDefs.map(def => (
                <button 
-                 key={def.type} 
-                 onClick={() => addAction(def.type)} 
+                 key={def.id} 
+                 onClick={() => addAction(def.id)} 
                  className="w-full text-left px-2 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700 flex items-center gap-2 transition-colors"
                >
                  {getIcon(def.iconName, def.colorClass)}
@@ -308,6 +383,11 @@ const Inspector: React.FC = () => {
 
   const addEvent = (trigger: 'onEnter' | 'onExit' | 'onClick', targetId?: string) => {
     if (!selectedNode) return;
+    const exists = (selectedNode.events || []).some(e => e.trigger === trigger && e.targetId === targetId);
+    if (exists) {
+      setShowEventMenu(false);
+      return;
+    }
     
     let label: string = trigger;
     if (trigger === 'onClick' && targetId) {
@@ -646,9 +726,11 @@ const Inspector: React.FC = () => {
                           <button onClick={() => addEvent('onEnter')} className="w-full text-left px-2 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700 flex items-center gap-2 transition-colors"><PlayCircle className="w-3 h-3 text-green-400" /> On Enter</button>
                           <button onClick={() => addEvent('onExit')} className="w-full text-left px-2 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700 flex items-center gap-2 transition-colors"><StopCircle className="w-3 h-3 text-red-400" /> On Exit</button>
                           <div className="border-t border-zinc-700 my-1"></div>
-                          {(selectedNode as LocationNode).hotspots?.map(hs => (
-                            <button key={hs.id} onClick={() => addEvent('onClick', hs.id)} className="w-full text-left px-2 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700 flex items-center gap-2 transition-colors"><Target className="w-3 h-3 text-amber-400" /> Click: {hs.name}</button>
-                          ))}
+                          {(selectedNode as LocationNode).hotspots
+                            ?.filter(hs => !(selectedNode.events || []).some(e => e.trigger === 'onClick' && e.targetId === hs.id))
+                            .map(hs => (
+                              <button key={hs.id} onClick={() => addEvent('onClick', hs.id)} className="w-full text-left px-2 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700 flex items-center gap-2 transition-colors"><Target className="w-3 h-3 text-amber-400" /> Click: {hs.name}</button>
+                            ))}
                         </div>
                       </>
                     )}
@@ -669,7 +751,7 @@ const Inspector: React.FC = () => {
                                     {isExpanded ? <ChevronDown className="w-3 h-3 text-zinc-500"/> : <ChevronRight className="w-3 h-3 text-zinc-500"/>}
                                     <Zap className={`w-3 h-3 ${evt.trigger === 'onClick' ? 'text-amber-400' : 'text-indigo-400'}`} />
                                     <span className="text-zinc-300 font-semibold">{evt.label}</span>
-                                    <span className="text-[9px] bg-zinc-900 text-zinc-500 px-1 rounded">{evt.actions?.length || 0} Actions</span>
+                                    <span className="text-[9px] bg-zinc-900 text-amber-400/80 px-1 rounded border border-amber-400/30">Connect to Action node</span>
                                 </div>
                                 <button 
                                     onClick={(e) => {
@@ -685,18 +767,14 @@ const Inspector: React.FC = () => {
                                 </button>
                             </div>
                             
-                            {/* Actions Editor (Expandable) */}
+                            {/* Actions Editor (Disabled: single-flow model, use graph edges) */}
                             {isExpanded && (
-                                <div className="p-2 border-t border-zinc-700 bg-zinc-900/30">
-                                    <ActionStackEditor 
-                                        actions={evt.actions || []}
-                                        onChange={(newActions) => {
-                                            startEditing(selectedNode.id);
-                                            const newEvents = (selectedNode.events || []).map(e => e.id === evt.id ? { ...e, actions: newActions } : e);
-                                            updateNode(selectedNode.id, { events: newEvents });
-                                        }}
-                                        onBlur={commitEditing}
-                                    />
+                                <div className="p-3 border-t border-zinc-700 bg-zinc-900/40 text-[11px] text-zinc-400 space-y-2">
+                                    <div className="flex items-center gap-2 text-amber-300">
+                                        <Zap className="w-3 h-3" />
+                                        <span>动作需通过连线到动作节点完成</span>
+                                    </div>
+                                    <p className="text-zinc-500">将此事件的输出端 (闪电) 连到 <span className="text-cyan-300">Action</span> 节点或条件节点，再串联动作序列。</p>
                                 </div>
                             )}
                         </div>

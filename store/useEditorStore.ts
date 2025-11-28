@@ -1,173 +1,25 @@
-
 import { create } from 'zustand';
 import { StoryAsset, NodeType, NarrativeNode, Edge, GlobalVariable, AttributeDefinition, CharacterAsset, Item, Clue, EditorTab, TabType, ScriptActionType, VoteNode, ShopDefinition } from '../types';
 import { CommandBus } from '../engine/CommandBus';
 import { AssetManager } from '../engine/AssetManager';
 import { SelectionManager } from '../engine/SelectionManager';
-import { UpdateNodeCommand, AddNodeCommand, RemoveNodeCommand, AddEdgeCommand, RemoveEdgeCommand } from '../engine/commands';
+import { UpdateNodeCommand, AddNodeCommand, RemoveNodeCommand, AddEdgeCommand, RemoveEdgeCommand, BatchUpdateNodesCommand, BatchDeleteEntitiesCommand } from '../engine/commands';
+import { ICommand } from '../engine/interfaces';
 
 // --- Initial Data ---
 
-const INITIAL_STORY: StoryAsset = {
-  id: 'story_1',
-  title: '赛博东京之影',
-  description: '发生在霓虹闪烁的未来的黑色侦探惊悚片。',
-  activeSegmentId: 'seg_1',
-  // Legacy support
-  globalVariables: [], 
-  // New RPG Attributes
-  attributes: [
-    { 
-        id: 'attr_sanity', 
-        key: 'sanity', 
-        name: '理智值 (Sanity)', 
-        type: 'number', 
-        defaultValue: 100, 
-        min: 0, 
-        max: 100, 
-        description: '角色的精神健康状态，归零时游戏结束。' 
-    },
-    { 
-        id: 'attr_coin', 
-        key: 'coin', 
-        name: '新日元 (Credits)', 
-        type: 'number', 
-        defaultValue: 500,
-        min: 0,
-        description: '通用货币，用于购买道具。'
-    },
-    { 
-        id: 'attr_haskey', 
-        key: 'hasKey', 
-        name: '拥有密匙', 
-        type: 'boolean', 
-        defaultValue: false 
-    },
-  ],
-  characters: [
-    { id: 'char_1', name: 'K 探员', avatarUrl: 'https://picsum.photos/id/64/200/200', description: '一位从不睡觉的私家侦探。' },
-    { id: 'char_2', name: 'ARIA (AI)', avatarUrl: 'https://picsum.photos/id/237/200/200', description: '你的全息助理。' }
-  ],
-  items: [
-    { id: 'item_1', name: '生锈的钥匙', description: '看起来很久没用了，也许能打开旧城区的某扇门。' },
-    { 
-        id: 'item_2', 
-        name: '万能解码器', 
-        description: '黑客工具，需要电池驱动。',
-        recipe: {
-            ingredients: [
-                { itemId: 'item_3', count: 1 },
-            ],
-            costAttribute: { attributeId: 'attr_coin', amount: 50 }
-        }
-    },
-    { id: 'item_3', name: '废旧电池', description: '虽然旧了点，但还有电。' }
-  ],
-  shops: [
-      {
-          id: 'shop_1',
-          name: '黑市 (Dark Web)',
-          description: '只有最绝望的人才会来这里交易。',
-          inventory: [
-              { itemId: 'item_2', price: 200, currencyAttributeId: 'attr_coin' },
-              { itemId: 'item_3', price: 50, currencyAttributeId: 'attr_coin' }
-          ]
-      }
-  ],
-  clues: [
-    { id: 'clue_1', name: '神秘电话', description: '电话那头的声音经过了变声处理，提到“午夜钟声”。', revealed: true, owners: ['char_1'] },
-    { id: 'clue_2', name: '湿润的脚印', description: '办公室门口有一串未干的脚印，尺寸很大。', revealed: false, owners: [] }
-  ],
-  segments: [
-    {
-      id: 'seg_1',
-      name: '第一章：来电',
-      rootNodeId: 'node_start',
-      nodes: {
-        'node_start': {
-          id: 'node_start',
-          type: NodeType.START,
-          name: 'Start',
-          position: { x: 50, y: 220 },
-          size: { x: 120, y: 60 }
-        } as NarrativeNode,
-        'node_1': {
-          id: 'node_1',
-          type: NodeType.LOCATION,
-          name: 'K 的办公室',
-          position: { x: 250, y: 100 },
-          size: { x: 400, y: 300 },
-          backgroundImage: 'https://picsum.photos/id/180/800/600',
-          hotspots: [],
-          events: [
-            { 
-                id: 'evt_1', 
-                type: 'lifecycle', 
-                trigger: 'onEnter', 
-                label: '进入时 (Auto)',
-                actions: [
-                    { 
-                        id: 'act_1', 
-                        type: ScriptActionType.UPDATE_ATTRIBUTE, 
-                        params: { attributeId: 'attr_sanity', op: 'add', value: -5 } 
-                    },
-                    {
-                        id: 'act_2',
-                        type: ScriptActionType.SHOW_TOAST,
-                        params: { message: '感觉一阵寒意... (Sanity -5)' }
-                    }
-                ] 
-            }
-          ]
-        } as NarrativeNode,
-        'node_2': {
-          id: 'node_2',
-          type: NodeType.DIALOGUE,
-          name: '开场独白',
-          position: { x: 750, y: 200 },
-          size: { x: 300, y: 180 },
-          characterId: 'char_1',
-          text: '雨……这座城市的雨从未停歇。',
-          choices: [
-            { id: 'c1', text: '接听电话' },
-            { id: 'c2', text: '忽略它' }
-          ]
-        } as NarrativeNode,
-         'node_3': {
-          id: 'node_3',
-          type: NodeType.VOTE,
-          name: '抉择时刻',
-          position: { x: 1150, y: 100 },
-          size: { x: 300, y: 200 },
-          voteConfig: {
-              title: "接听还是挂断？",
-              duration: 15,
-              options: [
-                  { id: 'v1', text: '接听', score: 10, isCorrect: true },
-                  { id: 'v2', text: '挂断', score: 0, isCorrect: false }
-              ],
-              strategy: 'majority'
-          }
-        } as VoteNode,
-        'node_4': {
-          id: 'node_4',
-          type: NodeType.DIALOGUE,
-          name: '忽略电话',
-          position: { x: 1150, y: 400 },
-          size: { x: 300, y: 150 },
-          characterId: 'char_1',
-          text: '（继续抽烟，看着窗外的雨）',
-          choices: []
-        } as NarrativeNode
-      },
-      edges: [
-        { id: 'e_start', sourceNodeId: 'node_start', targetNodeId: 'node_1' },
-        { id: 'e1', sourceNodeId: 'node_1', sourceHandleId: 'evt_1', targetNodeId: 'node_2' },
-        { id: 'e2', sourceNodeId: 'node_2', sourceHandleId: 'c1', targetNodeId: 'node_3' },
-        { id: 'e3', sourceNodeId: 'node_2', sourceHandleId: 'c2', targetNodeId: 'node_4' }
-      ]
-    }
-  ]
+const EMPTY_STORY: StoryAsset = {
+  id: 'story_empty',
+  title: '',
+  description: '',
+  activeSegmentId: '',
+  globalVariables: [],
+  attributes: [],
+  characters: [],
+  items: [],
+  shops: [],
+  clues: [],
+  segments: []
 };
 
 // Initial Tabs
@@ -179,6 +31,8 @@ interface EditorState {
   story: StoryAsset;
   selectedIds: string[];
   canvasTransform: { x: number; y: number; scale: number };
+  isStoryLoading: boolean;
+  loadSampleStory: () => Promise<void>;
   
   // Tab State
   tabs: EditorTab[];
@@ -197,8 +51,10 @@ interface EditorState {
   
   // Node Manipulation
   updateNode: (id: string, data: Partial<NarrativeNode>) => void;
+  updateNodes: (updates: { id: string; data: Partial<NarrativeNode> }[]) => void;
   startEditing: (id: string) => void;
   commitEditing: () => void;
+  commitBatchUpdate: (updates: { id: string; oldData: Partial<NarrativeNode>; newData: Partial<NarrativeNode> }[]) => void;
   
   // CRUD
   addNode: (type: NodeType, position: {x:number, y:number}) => void;
@@ -243,6 +99,7 @@ interface EditorState {
 
 // Instantiate core systems
 const commandBus = new CommandBus();
+const loadSampleStoryAsset = () => import('../engine/sample_story.json').then(mod => mod.default as StoryAsset);
 
 export const useEditorStore = create<EditorState>((set, get) => {
   
@@ -259,9 +116,21 @@ export const useEditorStore = create<EditorState>((set, get) => {
   );
 
   return {
-    story: INITIAL_STORY,
+    story: EMPTY_STORY,
+    isStoryLoading: false,
     selectedIds: [],
     canvasTransform: { x: 0, y: 0, scale: 1 },
+    loadSampleStory: async () => {
+      if (get().isStoryLoading) return;
+      set({ isStoryLoading: true });
+      try {
+        const story = await loadSampleStoryAsset();
+        set({ story, isStoryLoading: false });
+      } catch (e) {
+        console.error('[useEditorStore] Failed to load sample story', e);
+        set({ isStoryLoading: false });
+      }
+    },
     
     // Tab System
     tabs: INITIAL_TABS,
@@ -337,6 +206,20 @@ export const useEditorStore = create<EditorState>((set, get) => {
         return { story: newStory };
       });
     },
+    updateNodes: (updates) => {
+      if (!updates || updates.length === 0) return;
+      set(state => {
+        const activeSeg = state.story.segments.find(s => s.id === state.story.activeSegmentId);
+        if (!activeSeg) return state;
+        const newNodes = { ...activeSeg.nodes };
+        updates.forEach(u => {
+          const node = newNodes[u.id];
+          if (node) newNodes[u.id] = { ...node, ...u.data };
+        });
+        const newSegments = state.story.segments.map(s => s.id === activeSeg.id ? { ...activeSeg, nodes: newNodes } : s);
+        return { story: { ...state.story, segments: newSegments } };
+      });
+    },
 
     startEditing: (id: string) => {
         const state = get();
@@ -372,6 +255,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
             syncCommandState();
         }
 
+        set({ editingNodeId: null, originalNodeData: null });
+    },
+
+    commitBatchUpdate: (updates) => {
+        if (!updates || updates.length === 0) return;
+        const state = get();
+        const segmentId = state.story.activeSegmentId;
+        const batch = new BatchUpdateNodesCommand(updates, segmentId, set);
+        commandBus.execute(batch);
+        syncCommandState();
         set({ editingNodeId: null, originalNodeData: null });
     },
 
@@ -436,25 +329,26 @@ export const useEditorStore = create<EditorState>((set, get) => {
         const activeSeg = story.segments.find(s => s.id === story.activeSegmentId);
         if (!activeSeg) return;
 
+        const nodesToDelete: NarrativeNode[] = [];
+        const edgesToDelete: Edge[] = [];
+
         selectedIds.forEach(id => {
             if (activeSeg.nodes[id]) {
                 const node = activeSeg.nodes[id];
-                // PROTECT START NODE
                 if (node.type === NodeType.START) return;
-
-                const command = new RemoveNodeCommand(id, node, activeSeg.id, set);
-                commandBus.execute(command);
+                nodesToDelete.push(node);
             } else {
                 const edge = activeSeg.edges.find(e => e.id === id);
-                if (edge) {
-                    const command = new RemoveEdgeCommand(id, edge, activeSeg.id, set);
-                    commandBus.execute(command);
-                }
+                if (edge) edgesToDelete.push(edge);
             }
         });
-        
+
+        if (nodesToDelete.length || edgesToDelete.length) {
+            const batch = new BatchDeleteEntitiesCommand(activeSeg.id, nodesToDelete, edgesToDelete, set);
+            commandBus.execute(batch);
+            syncCommandState();
+        }
         state.clearSelection();
-        syncCommandState();
     },
 
     // --- Attribute CRUD ---
@@ -649,3 +543,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
     }
   };
 });
+
+// Auto-load sample story asynchronously to avoid bundling大块初始数据到主包
+useEditorStore.getState().loadSampleStory();

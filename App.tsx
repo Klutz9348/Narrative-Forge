@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Play, Save, Undo, Redo, X, Box, Variable, Users, Package, Search, Gauge, ShoppingCart } from 'lucide-react';
+import { Play, Save, Undo, Redo, X, Box, Variable, Users, Package, Search, Gauge, ShoppingCart, Download } from 'lucide-react';
 import { useEditorStore } from './store/useEditorStore';
 import { useRuntimeStore } from './store/useRuntimeStore';
 
@@ -30,6 +30,24 @@ function App() {
   const { setIsRunning } = useRuntimeStore();
 
   const activeTab = tabs.find(t => t.id === activeTabId);
+
+  const exportStory = () => {
+    const payload = JSON.stringify(story, null, 2);
+
+    // Download as JSON file
+    const blob = new Blob([payload], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${story.title || 'story'}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+
+    // Also try copying to clipboard for quick share
+    if (navigator?.clipboard) {
+      navigator.clipboard.writeText(payload).catch(() => {});
+    }
+  };
 
   const renderContent = () => {
       if (!activeTab) return <div className="flex-1 bg-[#121212]" />;
@@ -112,6 +130,13 @@ function App() {
               className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-xs px-3 py-1.5 rounded transition-colors font-semibold shadow-sm shadow-indigo-900/20"
             >
               <Play className="w-3 h-3 fill-current" /> 运行
+            </button>
+            <button
+              onClick={exportStory}
+              className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-xs px-3 py-1.5 rounded transition-colors font-semibold text-zinc-200"
+              title="导出当前剧本 JSON（自动下载并复制）"
+            >
+              <Download className="w-3 h-3" /> 导出剧本
             </button>
           </div>
         </div>

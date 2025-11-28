@@ -60,6 +60,10 @@ export class AssetManager {
         return { ...base, name: 'Location', backgroundImage: '', hotspots: [] } as any;
       case NodeType.BRANCH:
         return { ...base, name: 'Logic Branch', conditions: [] } as any;
+      case NodeType.SEQUENCE:
+        return { ...base, name: 'Sequence', size: { x: 220, y: 120 } } as any;
+      case NodeType.SWITCH:
+        return { ...base, name: 'Switch', size: { x: 240, y: 140 } } as any;
       case NodeType.JUMP:
         return { ...base, name: 'Jump to...', targetSegmentId: '', size: { x: 250, y: 120 } } as any;
       case NodeType.ACTION:

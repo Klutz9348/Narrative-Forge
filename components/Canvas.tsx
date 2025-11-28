@@ -1,9 +1,10 @@
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { MousePointer2, Type, Image as ImageIcon, ZoomIn, ZoomOut, GitGraph, ArrowRightCircle, ChevronDown, Layers, Zap, Clapperboard, Timer, Smartphone, MessageSquare, Play, Package, Vote, Variable } from 'lucide-react';
+import { MousePointer2, Type, Image as ImageIcon, ZoomIn, ZoomOut, GitGraph, ArrowRightCircle, ChevronDown, Layers, Zap, Clapperboard, Timer, Smartphone, MessageSquare, Play, Package, Vote, Variable, Code } from 'lucide-react';
 import { NodeType, NarrativeNode, Vector2, DialogueNode, BranchNode, JumpNode, LocationNode, ActionNode, Hotspot, ScriptActionType, VoteNode } from '../types';
 import { useEditorStore } from '../store/useEditorStore';
 import { useShallow } from 'zustand/react/shallow';
+import { getActionCatalog } from '../engine/logic/uiCatalog';
 
 // Bezier Curve Helper
 const getBezierPath = (
@@ -130,22 +131,26 @@ const Canvas: React.FC = () => {
     selectNode, 
     clearSelection,
     updateNode,
+    updateNodes,
     addNode,
     addEdge,
     deleteSelection,
     startEditing,
     commitEditing,
-    setCanvasTransform
+    setCanvasTransform,
+    commitBatchUpdate
   } = useEditorStore(useShallow(state => ({
     selectNode: state.selectNode,
     clearSelection: state.clearSelection,
     updateNode: state.updateNode,
+    updateNodes: state.updateNodes,
     addNode: state.addNode,
     addEdge: state.addEdge,
     deleteSelection: state.deleteSelection,
     startEditing: state.startEditing,
     commitEditing: state.commitEditing,
-    setCanvasTransform: state.setCanvasTransform
+    setCanvasTransform: state.setCanvasTransform,
+    commitBatchUpdate: state.commitBatchUpdate
   })));
 
   // 2. High Frequency State
@@ -163,10 +168,22 @@ const Canvas: React.FC = () => {
       characters: state.story.characters,
       attributes: state.story.attributes
   })));
+  const actionCatalog = useMemo(() => {
+    const list = getActionCatalog();
+    const map: Record<string, { label: string }> = {};
+    list.forEach(d => { map[d.id] = { label: d.label }; });
+    return map;
+  }, []);
 
   // Local State
   const [isPanning, setIsPanning] = useState(false);
-  const [dragState, setDragState] = useState<{ nodeId: string, startX: number, startY: number, initialPos: Vector2 } | null>(null);
+  const [dragState, setDragState] = useState<{
+    startX: number;
+    startY: number;
+    initialPositions: Record<string, Vector2>;
+    activeIds: string[];
+  } | null>(null);
+  const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; x: number; y: number; active: boolean }>({ startX: 0, startY: 0, x: 0, y: 0, active: false });
   
   // Hotspot Drag & Resize State
   const [hotspotDragState, setHotspotDragState] = useState<{
@@ -212,6 +229,8 @@ const Canvas: React.FC = () => {
     linkingState,
     isPanning,
     panStart,
+    selectionBox,
+    nodes
   });
 
   useEffect(() => {
@@ -223,20 +242,27 @@ const Canvas: React.FC = () => {
       linkingState, 
       isPanning, 
       panStart,
+      selectionBox,
+      nodes
     };
-  }, [canvasTransform, dragState, hotspotDragState, hotspotResizeState, linkingState, isPanning, panStart]);
+  }, [canvasTransform, dragState, hotspotDragState, hotspotResizeState, linkingState, isPanning, panStart, selectionBox, nodes]);
 
   // --- Keyboard Shortcuts ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
+        const multi = selectedIds.length > 1;
+        if (multi) {
+          const ok = window.confirm(`删除 ${selectedIds.length} 个选中的节点/连线？`);
+          if (!ok) return;
+        }
         deleteSelection();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [deleteSelection]);
+  }, [deleteSelection, selectedIds.length]);
 
   // --- Global Window Event Listeners ---
   useEffect(() => {
@@ -262,13 +288,22 @@ const Canvas: React.FC = () => {
       else if (current.dragState) {
         const dx = (e.clientX - current.dragState.startX) / current.canvasTransform.scale;
         const dy = (e.clientY - current.dragState.startY) / current.canvasTransform.scale;
-        
-        updateNode(current.dragState.nodeId, {
-          position: {
-            x: Math.round(current.dragState.initialPos.x + dx),
-            y: Math.round(current.dragState.initialPos.y + dy)
-          }
-        });
+        const updates = current.dragState.activeIds.map(id => {
+          const initial = current.dragState!.initialPositions[id];
+          if (!initial) return null;
+          return {
+            id,
+            data: {
+              position: {
+                x: Math.round(initial.x + dx),
+                y: Math.round(initial.y + dy)
+              }
+            }
+          };
+        }).filter(Boolean) as { id: string; data: Partial<NarrativeNode> }[];
+        if (updates.length) {
+          updateNodes(updates);
+        }
       }
       else if (current.hotspotDragState) {
         const dx = (e.clientX - current.hotspotDragState.startX) / current.canvasTransform.scale;
@@ -356,6 +391,17 @@ const Canvas: React.FC = () => {
         
         setLinkingState({ ...current.linkingState, mousePos: pos });
         stateRef.current.linkingState = { ...current.linkingState, mousePos: pos };
+      } else if (current.selectionBox && current.selectionBox.active) {
+        const rect = containerRef.current?.getBoundingClientRect();
+        const offsetX = rect ? rect.left : 0;
+        const offsetY = rect ? rect.top : 0;
+        const pos = {
+          x: (e.clientX - offsetX - current.canvasTransform.x) / current.canvasTransform.scale,
+          y: (e.clientY - offsetY - current.canvasTransform.y) / current.canvasTransform.scale
+        };
+        const next = { ...current.selectionBox, x: pos.x, y: pos.y };
+        setSelectionBox(next);
+        stateRef.current.selectionBox = next;
       }
     };
 
@@ -363,7 +409,24 @@ const Canvas: React.FC = () => {
       const current = stateRef.current;
 
       if (current.dragState) {
-        commitEditing(); 
+        const storeState = useEditorStore.getState();
+        const activeSeg = storeState.story.segments.find(s => s.id === storeState.story.activeSegmentId);
+        const updates: { id: string; oldData: Partial<NarrativeNode>; newData: Partial<NarrativeNode> }[] = [];
+        current.dragState.activeIds.forEach(id => {
+          const initial = current.dragState!.initialPositions[id];
+          const node = activeSeg?.nodes[id];
+          if (!initial || !node) return;
+          if (node.position.x !== initial.x || node.position.y !== initial.y) {
+            updates.push({
+              id,
+              oldData: { position: initial },
+              newData: { position: node.position }
+            });
+          }
+        });
+        if (updates.length) {
+          commitBatchUpdate(updates); 
+        }
         setDragState(null);
         stateRef.current.dragState = null;
       }
@@ -389,6 +452,27 @@ const Canvas: React.FC = () => {
          setLinkingState(null);
          stateRef.current.linkingState = null;
       }
+
+      if (current.selectionBox && current.selectionBox.active) {
+        const minX = Math.min(current.selectionBox.startX, current.selectionBox.x);
+        const maxX = Math.max(current.selectionBox.startX, current.selectionBox.x);
+        const minY = Math.min(current.selectionBox.startY, current.selectionBox.y);
+        const maxY = Math.max(current.selectionBox.startY, current.selectionBox.y);
+        const hit = current.nodes?.filter(n => {
+          const withinX = n.position.x >= minX && (n.position.x + n.size.x) <= maxX;
+          const withinY = n.position.y >= minY && (n.position.y + n.size.y) <= maxY;
+          return withinX && withinY;
+        }).map(n => n.id) || [];
+
+        if (hit.length) {
+          selectNode(hit[0], false);
+          hit.slice(1).forEach(id => selectNode(id, true));
+        }
+
+        const resetBox = { startX: 0, startY: 0, x: 0, y: 0, active: false };
+        setSelectionBox(resetBox);
+        stateRef.current.selectionBox = resetBox;
+      }
     };
 
     window.addEventListener('mousemove', handleWindowMouseMove);
@@ -404,7 +488,6 @@ const Canvas: React.FC = () => {
 
   const handleWheel = (e: React.WheelEvent) => {
     if (e.ctrlKey || e.metaKey) {
-      e.preventDefault();
       const zoomSensitivity = 0.001;
       const newScale = Math.min(Math.max(0.1, canvasTransform.scale - e.deltaY * zoomSensitivity), 5);
       setCanvasTransform({ ...canvasTransform, scale: newScale });
@@ -424,6 +507,10 @@ const Canvas: React.FC = () => {
       stateRef.current.isPanning = true;
       stateRef.current.panStart = { x: e.clientX, y: e.clientY };
     } else {
+        const pos = getCanvasMousePos(e.clientX, e.clientY);
+        const box = { startX: pos.x, startY: pos.y, x: pos.x, y: pos.y, active: true };
+        setSelectionBox(box);
+        stateRef.current.selectionBox = box;
         clearSelection();
     }
     setShowLogicMenu(false);
@@ -445,20 +532,29 @@ const Canvas: React.FC = () => {
     e.stopPropagation();
     if (e.button !== 0) return;
     
-    selectNode(node.id, e.shiftKey);
-    startEditing(node.id); 
+    const alreadySelected = selectedIds.includes(node.id);
+    if (e.shiftKey) {
+      selectNode(node.id, true);
+    } else if (!alreadySelected) {
+      selectNode(node.id, false);
+    }
     
-    const newDragState = {
-      nodeId: node.id,
-      startX: e.clientX,
-      startY: e.clientY,
-      initialPos: { ...node.position }
-    };
+    const currentSelection = useEditorStore.getState().selectedIds;
+    const activeIds = currentSelection.length ? currentSelection : [node.id];
+    const initialPositions: Record<string, Vector2> = {};
+    activeIds.forEach(id => {
+      const found = nodes.find(n => n.id === id);
+      if (found) {
+        initialPositions[id] = { ...found.position };
+      }
+    });
+
+    const newDragState = { startX: e.clientX, startY: e.clientY, initialPositions, activeIds };
 
     setDragState(newDragState);
     stateRef.current.dragState = newDragState;
     setShowLogicMenu(false);
-  }, [selectNode, startEditing]);
+  }, [selectNode, selectedIds, nodes]);
 
   const handleHotspotMouseDown = (e: React.MouseEvent, nodeId: string, hotspot: Hotspot, nodeSize: Vector2) => {
     e.stopPropagation(); 
@@ -880,6 +976,32 @@ const Canvas: React.FC = () => {
         );
         break;
       
+      case NodeType.SEQUENCE:
+        content = (
+          <div className="flex flex-col h-full gap-2 text-xs text-zinc-400">
+            <div className="italic text-[11px] text-zinc-500">按连线顺序依次执行，最后可跳转到下一个节点。</div>
+            <div className="rounded border border-zinc-700/60 bg-black/20 p-2 text-[11px] text-zinc-300">
+              <div className="font-mono text-amber-300 mb-1">STEP 1..N</div>
+              <div>从该节点拉出多条连线，线条顺序即执行顺序。</div>
+              <div className="mt-1 text-zinc-500 text-[10px]">终点连到 Action 或其他节点。</div>
+            </div>
+          </div>
+        );
+        break;
+      
+      case NodeType.SWITCH:
+        content = (
+          <div className="flex flex-col h-full gap-2 text-xs text-zinc-400">
+            <div className="italic text-[11px] text-zinc-500">按条件匹配出边（建议在连线条件中填写比较逻辑）。</div>
+            <div className="rounded border border-zinc-700/60 bg-black/20 p-2 text-[11px] text-zinc-300">
+              <div className="font-mono text-amber-300 mb-1">CASE 1..N</div>
+              <div>为每条出边设置 condition；命中首条条件即跳转。</div>
+              <div className="mt-1 text-zinc-500 text-[10px]">未命中时可加默认边。</div>
+            </div>
+          </div>
+        );
+        break;
+      
       case NodeType.JUMP:
         const jumpNode = node as JumpNode;
         // Need segments list for this. Since it's just display name, accessing story.segments via getter might be overkill.
@@ -913,6 +1035,7 @@ const Canvas: React.FC = () => {
                   else if (cmd.type === ScriptActionType.SHOW_TOAST) { Icon = MessageSquare; Color = "text-green-400"; }
                   else if (cmd.type === ScriptActionType.UPDATE_ATTRIBUTE) { Icon = Variable; Color = "text-purple-400"; }
                   else if (cmd.type === ScriptActionType.ADD_ITEM || cmd.type === ScriptActionType.REMOVE_ITEM) { Icon = Package; Color = "text-amber-400"; }
+                  else if (cmd.type === ScriptActionType.ADVANCE) { Icon = ArrowRightCircle; Color = "text-zinc-300"; }
                   
                   // Try to get attribute name if available
                   let extraText = "";
@@ -921,11 +1044,12 @@ const Canvas: React.FC = () => {
                       if(attrName) extraText = ` (${attrName})`;
                   }
 
+                  const label = actionCatalog[cmd.type]?.label || cmd.type;
                   return (
                     <div key={cmd.id} className="flex items-center gap-2 bg-black/20 p-1.5 rounded border border-zinc-700/50 text-[10px]">
                        <span className="text-zinc-600 font-mono w-4 text-center">{idx + 1}</span>
                        <Icon className={`w-3 h-3 ${Color}`} />
-                       <span className="truncate text-zinc-300 font-mono">{cmd.type}{extraText}</span>
+                       <span className="truncate text-zinc-300 font-mono">{label}{extraText}</span>
                     </div>
                   );
                 })}
@@ -1003,6 +1127,8 @@ const Canvas: React.FC = () => {
       case NodeType.START: return 'bg-emerald-800/80 text-white';
       case NodeType.LOCATION: return 'bg-emerald-900/50 text-emerald-400';
       case NodeType.BRANCH: return 'bg-amber-900/50 text-amber-400';
+      case NodeType.SEQUENCE: return 'bg-cyan-900/60 text-cyan-300';
+      case NodeType.SWITCH: return 'bg-sky-900/60 text-sky-300';
       case NodeType.JUMP: return 'bg-rose-900/50 text-rose-400';
       case NodeType.ACTION: return 'bg-slate-900/80 text-cyan-400';
       case NodeType.VOTE: return 'bg-violet-900/80 text-violet-300';
@@ -1015,6 +1141,8 @@ const Canvas: React.FC = () => {
       case NodeType.START: return <Play className="w-3 h-3 fill-current" />;
       case NodeType.LOCATION: return <ImageIcon className="w-3 h-3" />;
       case NodeType.BRANCH: return <GitGraph className="w-3 h-3" />;
+      case NodeType.SEQUENCE: return <Layers className="w-3 h-3" />;
+      case NodeType.SWITCH: return <Code className="w-3 h-3" />;
       case NodeType.JUMP: return <ArrowRightCircle className="w-3 h-3" />;
       case NodeType.ACTION: return <Clapperboard className="w-3 h-3" />;
       case NodeType.VOTE: return <Vote className="w-3 h-3" />;
@@ -1048,6 +1176,18 @@ const Canvas: React.FC = () => {
           transform: `translate(${canvasTransform.x}px, ${canvasTransform.y}px) scale(${canvasTransform.scale})`
         }}
       >
+        {/* Selection Box */}
+        {selectionBox.active && (
+          <div
+            className="absolute border border-indigo-400/60 bg-indigo-500/10"
+            style={{
+              left: Math.min(selectionBox.startX, selectionBox.x),
+              top: Math.min(selectionBox.startY, selectionBox.y),
+              width: Math.max(1, Math.abs(selectionBox.x - selectionBox.startX)),
+              height: Math.max(1, Math.abs(selectionBox.y - selectionBox.startY))
+            }}
+          />
+        )}
         {/* SVG Layer for Edges */}
         <svg className="absolute top-0 left-0 w-[10000px] h-[10000px] pointer-events-none overflow-visible">
           <defs>
@@ -1164,21 +1304,39 @@ const Canvas: React.FC = () => {
 
           {showLogicMenu && (
             <div className="absolute top-full left-0 mt-2 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl p-1 flex flex-col gap-1 min-w-[140px]">
-               <button 
+              <button 
+               draggable
+               onDragStart={(e) => onDragStart(e, NodeType.BRANCH)}
+               className="flex items-center gap-2 p-2 hover:bg-zinc-700 rounded text-zinc-300 hover:text-amber-400 text-left w-full cursor-grab active:cursor-grabbing"
+               onClick={() => handleAddNode(NodeType.BRANCH)}
+             >
+               <GitGraph className="w-4 h-4" />
+               <span className="text-xs">分支判断</span>
+             </button>
+              <button 
                 draggable
-                onDragStart={(e) => onDragStart(e, NodeType.BRANCH)}
-                className="flex items-center gap-2 p-2 hover:bg-zinc-700 rounded text-zinc-300 hover:text-amber-400 text-left w-full cursor-grab active:cursor-grabbing"
-                onClick={() => handleAddNode(NodeType.BRANCH)}
+                onDragStart={(e) => onDragStart(e, NodeType.SEQUENCE)}
+                className="flex items-center gap-2 p-2 hover:bg-zinc-700 rounded text-zinc-300 hover:text-cyan-300 text-left w-full cursor-grab active:cursor-grabbing"
+                onClick={() => handleAddNode(NodeType.SEQUENCE)}
               >
-                <GitGraph className="w-4 h-4" />
-                <span className="text-xs">分支判断</span>
+                <Layers className="w-4 h-4" />
+                <span className="text-xs">顺序执行</span>
               </button>
-               <button 
+              <button 
                 draggable
-                onDragStart={(e) => onDragStart(e, NodeType.ACTION)}
-                className="flex items-center gap-2 p-2 hover:bg-zinc-700 rounded text-zinc-300 hover:text-cyan-400 text-left w-full cursor-grab active:cursor-grabbing"
-                onClick={() => handleAddNode(NodeType.ACTION)}
+                onDragStart={(e) => onDragStart(e, NodeType.SWITCH)}
+                className="flex items-center gap-2 p-2 hover:bg-zinc-700 rounded text-zinc-300 hover:text-blue-300 text-left w-full cursor-grab active:cursor-grabbing"
+                onClick={() => handleAddNode(NodeType.SWITCH)}
               >
+                <Code className="w-4 h-4" />
+                <span className="text-xs">条件切换</span>
+              </button>
+              <button 
+               draggable
+               onDragStart={(e) => onDragStart(e, NodeType.ACTION)}
+               className="flex items-center gap-2 p-2 hover:bg-zinc-700 rounded text-zinc-300 hover:text-cyan-400 text-left w-full cursor-grab active:cursor-grabbing"
+               onClick={() => handleAddNode(NodeType.ACTION)}
+             >
                 <Clapperboard className="w-4 h-4" />
                 <span className="text-xs">动作序列</span>
               </button>

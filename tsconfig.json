@@ -11,7 +11,12 @@
     ],
     "skipLibCheck": true,
     "types": [
-      "node"
+      "node",
+      "vitest"
+    ],
+    "typeRoots": [
+      "./types",
+      "./node_modules/@types"
     ],
     "moduleResolution": "bundler",
     "isolatedModules": true,

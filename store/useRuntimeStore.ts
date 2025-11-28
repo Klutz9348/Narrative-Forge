@@ -1,6 +1,6 @@
 
 import { create } from 'zustand';
-import { NarrativeNode, Item, AttributeDefinition } from '../types';
+import { NarrativeNode, Item, AttributeDefinition, LocationNode } from '../types';
 
 interface LogEntry {
   id: string;
@@ -24,6 +24,8 @@ interface RuntimeState {
   
   // Narrative State Sync
   currentNode: NarrativeNode | null;
+  currentScene: LocationNode | null;
+  lastLocationBackground?: string;
   history: LogEntry[];
   
   // RPG State Sync
@@ -37,6 +39,8 @@ interface RuntimeState {
   setIsRunning: (running: boolean) => void;
   setPaused: (paused: boolean) => void;
   setCurrentNode: (node: NarrativeNode | null) => void;
+  setCurrentScene: (scene: LocationNode | null) => void;
+  setLastLocationBackground: (url?: string) => void;
   toggleInventory: () => void;
   openShop: (shopId: string) => void;
   closeShop: () => void;
@@ -58,6 +62,8 @@ export const useRuntimeStore = create<RuntimeState>((set) => ({
   activeShopId: null,
   
   currentNode: null,
+  currentScene: null,
+  lastLocationBackground: undefined,
   history: [],
   attributes: {},
   inventory: {},
@@ -67,6 +73,8 @@ export const useRuntimeStore = create<RuntimeState>((set) => ({
   setPaused: (paused) => set({ isPaused: paused }),
   
   setCurrentNode: (node) => set({ currentNode: node }),
+  setCurrentScene: (scene) => set({ currentScene: scene }),
+  setLastLocationBackground: (url) => set({ lastLocationBackground: url }),
   
   toggleInventory: () => set((state) => ({ showInventory: !state.showInventory })),
   openShop: (shopId) => set({ activeShopId: shopId }),
@@ -90,6 +98,8 @@ export const useRuntimeStore = create<RuntimeState>((set) => ({
 
   reset: () => set({
     currentNode: null,
+    currentScene: null,
+    lastLocationBackground: undefined,
     history: [],
     attributes: {},
     inventory: {},

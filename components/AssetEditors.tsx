@@ -70,15 +70,26 @@ export const AttributeEditor: React.FC = () => {
                                     </td>
                                     <td className="px-6 py-4 align-top pt-5">
                                         <div className="flex items-center gap-2">
-                                            <input 
-                                                type={attr.type === 'number' ? 'number' : 'text'}
-                                                className="bg-zinc-950 border border-zinc-700 rounded px-3 py-1.5 text-sm text-green-400 font-mono w-full focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-900"
-                                                value={attr.defaultValue}
-                                                onChange={(e) => {
-                                                    const val = attr.type === 'number' ? parseFloat(e.target.value) : e.target.value;
-                                                    updateAttribute(attr.id, { defaultValue: val });
-                                                }}
-                                            />
+                                            {attr.type === 'boolean' ? (
+                                                <select
+                                                    className="bg-zinc-950 border border-zinc-700 rounded px-3 py-1.5 text-sm text-green-400 font-mono w-full focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-900"
+                                                    value={String(attr.defaultValue)}
+                                                    onChange={(e) => updateAttribute(attr.id, { defaultValue: e.target.value === 'true' })}
+                                                >
+                                                    <option value="true">true</option>
+                                                    <option value="false">false</option>
+                                                </select>
+                                            ) : (
+                                                <input 
+                                                    type={attr.type === 'number' ? 'number' : 'text'}
+                                                    className="bg-zinc-950 border border-zinc-700 rounded px-3 py-1.5 text-sm text-green-400 font-mono w-full focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-900"
+                                                    value={attr.defaultValue}
+                                                    onChange={(e) => {
+                                                        const val = attr.type === 'number' ? parseFloat(e.target.value) : e.target.value;
+                                                        updateAttribute(attr.id, { defaultValue: val });
+                                                    }}
+                                                />
+                                            )}
                                         </div>
                                     </td>
                                     <td className="px-6 py-4 align-top pt-5">

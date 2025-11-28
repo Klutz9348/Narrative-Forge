@@ -9,6 +9,8 @@ export enum NodeType {
   DIALOGUE = 'DIALOGUE',
   LOCATION = 'LOCATION',
   BRANCH = 'BRANCH',
+  SEQUENCE = 'SEQUENCE',
+  SWITCH = 'SWITCH',
   JUMP = 'JUMP',
   ACTION = 'ACTION', 
   VOTE = 'VOTE',
@@ -44,6 +46,20 @@ export interface DialogueNode extends NodeData {
 }
 
 // --- ECA System (Event-Condition-Action) ---
+export interface LogicConditionNode {
+  type: string;
+  params?: Record<string, any>;
+  children?: LogicConditionNode[];
+  negate?: boolean;
+}
+
+export interface LogicAction {
+  type: string;
+  params?: Record<string, any>;
+  delayMs?: number;
+  async?: boolean;
+  ignoreError?: boolean;
+}
 
 export enum ScriptActionType {
   UPDATE_ATTRIBUTE = 'UPDATE_ATTRIBUTE',
@@ -53,6 +69,8 @@ export enum ScriptActionType {
   WAIT = 'WAIT',
   SCREEN_SHAKE = 'SCREEN_SHAKE',
   SHOW_TOAST = 'SHOW_TOAST',
+  ADVANCE = 'ADVANCE',
+  JUMP_TO = 'JUMP_TO',
   // Phase 3: Social & Knowledge
   ADD_CLUE = 'ADD_CLUE',
   REMOVE_CLUE = 'REMOVE_CLUE',
@@ -62,9 +80,9 @@ export enum ScriptActionType {
   OPEN_CRAFTING = 'OPEN_CRAFTING'
 }
 
-export interface ScriptAction {
+export interface ScriptAction extends LogicAction {
   id: string;
-  type: ScriptActionType;
+  type: ScriptActionType | string;
   params: Record<string, any>;
 }
 
@@ -78,6 +96,7 @@ export interface NodeEvent {
   trigger: NodeEventTrigger;
   label: string;
   targetId?: string; // e.g., hotspotId
+  condition?: string | LogicConditionNode; // Optional guard
   actions: ScriptAction[]; // The logic payload
 }
 
@@ -174,6 +193,11 @@ export interface BranchNode extends NodeData {
   defaultNextNodeId?: string; 
 }
 
+export interface SequenceNode extends NodeData {
+  type: NodeType.SEQUENCE;
+  // childrenIds 顺序即执行顺序，由连线决定
+}
+
 export interface JumpNode extends NodeData {
   type: NodeType.JUMP;
   targetSegmentId: string; 
@@ -219,7 +243,7 @@ export interface Edge {
   sourceNodeId: string;
   targetNodeId: string;
   sourceHandleId?: string; 
-  condition?: string; 
+  condition?: string | LogicConditionNode; 
 }
 
 export interface SegmentAsset {

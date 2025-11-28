@@ -16,7 +16,7 @@ export interface ParamConfig {
 export interface ActionDefinition {
   type: ScriptActionType;
   label: string;
-  category: 'rpg' | 'inventory' | 'knowledge' | 'interaction' | 'presentation';
+  category: 'rpg' | 'inventory' | 'knowledge' | 'interaction' | 'presentation' | 'flow';
   description?: string;
   iconName?: string; // Lucide icon name hint
   colorClass?: string; // Tailwind color class hint
@@ -160,6 +160,26 @@ export const ACTION_REGISTRY: Record<ScriptActionType, ActionDefinition> = {
     colorClass: 'text-green-400',
     params: [
       { name: 'message', label: '内容', type: 'string', placeholder: '提示信息...' }
+    ]
+  },
+
+  // --- Flow Control ---
+  [ScriptActionType.ADVANCE]: {
+    type: ScriptActionType.ADVANCE,
+    label: '结束对话 / 推进 (Advance)',
+    category: 'flow',
+    iconName: 'SkipForward',
+    colorClass: 'text-zinc-300',
+    params: []
+  },
+  [ScriptActionType.JUMP_TO]: {
+    type: ScriptActionType.JUMP_TO,
+    label: '跳转到节点 (Jump)',
+    category: 'flow',
+    iconName: 'ArrowRightCircle',
+    colorClass: 'text-emerald-300',
+    params: [
+      { name: 'targetNodeId', label: '目标节点ID', type: 'string', placeholder: 'node_xxx' }
     ]
   }
 };
