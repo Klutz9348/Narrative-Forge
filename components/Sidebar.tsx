@@ -55,7 +55,7 @@ const Sidebar: React.FC = () => {
     }))
   );
 
-  const selectedIds = useEditorStore(state => state.selectedIds, useShallow);
+  const selectedIds = useEditorStore(useShallow(state => state.selectedIds));
 
   // We find active segment for rendering nodes list
   const activeSegment = segments.find(s => s.id === activeSegmentId);

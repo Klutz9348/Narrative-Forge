@@ -1,5 +1,5 @@
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { MousePointer2, Type, Image as ImageIcon, ZoomIn, ZoomOut, GitGraph, ArrowRightCircle, ChevronDown, Layers, Zap, Clapperboard, Timer, Smartphone, MessageSquare, Play, Package, Vote, Variable } from 'lucide-react';
 import { NodeType, NarrativeNode, Vector2, DialogueNode, BranchNode, JumpNode, LocationNode, ActionNode, Hotspot, ScriptActionType, VoteNode } from '../types';
 import { useEditorStore } from '../store/useEditorStore';
@@ -150,17 +150,13 @@ const Canvas: React.FC = () => {
 
   // 2. High Frequency State
   const canvasTransform = useEditorStore(state => state.canvasTransform);
-  const selectedIds = useEditorStore(state => state.selectedIds, useShallow);
+  const selectedIds = useEditorStore(useShallow(state => state.selectedIds));
 
   // 3. Asset Data (Filtered)
-  const { activeSegmentId, nodes, edges } = useEditorStore(useShallow(state => {
-    const activeSeg = state.story.segments.find(s => s.id === state.story.activeSegmentId);
-    return {
-        activeSegmentId: state.story.activeSegmentId,
-        nodes: activeSeg ? (Object.values(activeSeg.nodes) as NarrativeNode[]) : [],
-        edges: activeSeg ? activeSeg.edges : []
-    };
-  }));
+  // Avoid returning new arrays directly from the selector to keep getSnapshot stable.
+  const activeSegment = useEditorStore(state => state.story.segments.find(s => s.id === state.story.activeSegmentId));
+  const nodes = useMemo(() => activeSegment ? (Object.values(activeSegment.nodes) as NarrativeNode[]) : [], [activeSegment]);
+  const edges = activeSegment?.edges ?? [];
 
   // Need characters and attributes for node label rendering
   const { characters, attributes } = useEditorStore(useShallow(state => ({
