@@ -1,3 +1,4 @@
+// 文件路径: engine/VariableStore.ts
 
 import { IVariableStore, IEventBus } from './interfaces';
 import { StoryAsset, AttributeDefinition, Item, Clue } from '../types';
@@ -69,33 +70,40 @@ export class VariableStore implements IVariableStore {
 
   setAttribute(id: string, value: any): void {
     const def = this.attributeDefs.get(id);
-    if (!def) {
-      console.warn(`[VariableStore] Setting unknown attribute: ${id}`);
-      this.attributes[id] = value; // Fallback for legacy vars
-      return;
-    }
+    // Support setting by key as well if id not found
+    const targetId = def ? id : Array.from(this.attributeDefs.values()).find(a => a.key === id)?.id || id;
+    const targetDef = this.attributeDefs.get(targetId);
 
     let finalValue = value;
 
     // Type Checking & Clamping
-    if (def.type === 'number') {
-      finalValue = Number(value);
-      if (def.min !== undefined) finalValue = Math.max(def.min, finalValue);
-      if (def.max !== undefined) finalValue = Math.min(def.max, finalValue);
-    } else if (def.type === 'boolean') {
-      finalValue = Boolean(value);
+    if (targetDef) {
+        if (targetDef.type === 'number') {
+            finalValue = Number(value);
+            if (targetDef.min !== undefined) finalValue = Math.max(targetDef.min, finalValue);
+            if (targetDef.max !== undefined) finalValue = Math.min(targetDef.max, finalValue);
+        } else if (targetDef.type === 'boolean') {
+            finalValue = String(value) === 'true';
+        }
     }
 
-    const oldValue = this.attributes[id];
-    this.attributes[id] = finalValue;
+    const oldValue = this.attributes[targetId];
+    this.attributes[targetId] = finalValue;
 
     if (oldValue !== finalValue && this.eventBus) {
-      this.eventBus.emit('attribute:changed', { id, key: def.key, value: finalValue, oldValue });
+      this.eventBus.emit('attribute:changed', { id: targetId, key: targetDef?.key || targetId, value: finalValue, oldValue });
     }
   }
 
-  getAttribute(id: string): any {
-    return this.attributes[id];
+  getAttribute(idOrKey: string): any {
+    // Try direct ID match
+    if (this.attributes[idOrKey] !== undefined) return this.attributes[idOrKey];
+    
+    // Try Key match
+    const def = Array.from(this.attributeDefs.values()).find(a => a.key === idOrKey);
+    if (def) return this.attributes[def.id];
+    
+    return undefined;
   }
 
   modifyAttribute(id: string, operator: 'add' | 'sub' | 'set', value: number): void {
@@ -115,7 +123,7 @@ export class VariableStore implements IVariableStore {
     const current = this.inventory[itemId] || 0;
     const def = this.itemDefs.get(itemId);
     
-    // Check stackability (Simplified logic: if not stackable, max is 1)
+    // Check stackability
     if (def && !def.stackable && current >= 1) {
        console.log(`[VariableStore] Item ${def.name} is not stackable and already owned.`);
        return; 
@@ -157,13 +165,11 @@ export class VariableStore implements IVariableStore {
     const state = this.clueStates[clueId];
     if (!state) return;
 
-    // 1. Reveal it globally (Conceptually, obtaining a clue usually reveals it)
     if (!state.revealed) {
         state.revealed = true;
         this.eventBus?.emit('clue:revealed', { clueId });
     }
 
-    // 2. Assign ownership
     if (characterId && !state.owners.includes(characterId)) {
         state.owners.push(characterId);
         this.eventBus?.emit('clue:obtained', { clueId, characterId });
@@ -194,8 +200,6 @@ export class VariableStore implements IVariableStore {
     const state = this.clueStates[clueId];
     if (!state) return false;
     if (!state.revealed) return false;
-    
-    // If no character specified, just check if it's revealed/available
     if (!characterId) return true;
     return state.owners.includes(characterId);
   }
@@ -204,31 +208,46 @@ export class VariableStore implements IVariableStore {
       return this.clueStates[clueId]?.revealed || false;
   }
 
-  // --- Condition Logic ---
+  // --- Condition Logic (Safe Implementation) ---
 
   evaluateCondition(condition: string): boolean {
     if (!condition || condition.trim() === '') return true;
 
-    // TODO: Implement proper parser. For MVP, we map attribute keys to values.
-    // This allows conditions like "sanity > 50" if attribute key is 'sanity'.
-    const scope: Record<string, any> = {};
+    // Remove logic: Use a safe parser instead of eval/new Function
+    // Supports: "varName >= 10", "hasKey == true", "coin < 5"
     
-    // Map Attribute Definitions to current values
-    this.attributeDefs.forEach(def => {
-        scope[def.key] = this.getAttribute(def.id);
-        // Also map by ID just in case
-        scope[def.id] = this.getAttribute(def.id);
-    });
+    // 1. Simple Tokenizer
+    // Matches: [Variable] [Operator] [Value]
+    const match = condition.match(/^(\w+)\s*([><=!]+|contains)\s*(.+)$/);
+    
+    if (!match) {
+        // Fallback: Check if it's just a boolean variable name like "hasKey"
+        const val = this.getAttribute(condition.trim());
+        return !!val;
+    }
 
-    console.log(`[VariableStore] Eval: "${condition}" with scope:`, scope);
+    const [, key, op, valStr] = match;
+    const currentVal = this.getAttribute(key);
+    
+    // Parse target value
+    let targetVal: any = valStr.trim();
+    if (targetVal === 'true') targetVal = true;
+    else if (targetVal === 'false') targetVal = false;
+    else if (!isNaN(Number(targetVal))) targetVal = Number(targetVal);
+    else if (targetVal.startsWith("'") || targetVal.startsWith('"')) targetVal = targetVal.slice(1, -1);
 
-    try {
-      // DANGEROUS: MVP Only.
-      const result = new Function('vars', `with(vars) { return ${condition} }`)(scope);
-      return !!result;
-    } catch (e) {
-      console.warn(`[VariableStore] Condition failed: ${condition}`, e);
-      return false;
+    // Compare
+    switch (op) {
+        case '==': return currentVal == targetVal;
+        case '!=': return currentVal != targetVal;
+        case '>': return Number(currentVal) > Number(targetVal);
+        case '>=': return Number(currentVal) >= Number(targetVal);
+        case '<': return Number(currentVal) < Number(targetVal);
+        case '<=': return Number(currentVal) <= Number(targetVal);
+        case 'contains': return String(currentVal).includes(String(targetVal));
+        default: 
+            console.warn(`[VariableStore] Unknown operator ${op} in condition ${condition}`);
+            return false;
     }
   }
 }
