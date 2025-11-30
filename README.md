@@ -18,3 +18,9 @@ View your app in AI Studio: https://ai.studio/apps/drive/1eWjyoBrfG1x4WYcDd7HN6v
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+## Project roadmap
+
+- 当前 UI 是 Vite + React 的编辑器原型（Figma 风格，含侧边栏 / 画布 / Inspector）。
+- 规划中的“引擎层”将比照 Unity/Godot 的场景树与命令总线，前端与内核通过事件模型解耦。
+- 更细的迭代拆解与技术路线请见 [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md)。
